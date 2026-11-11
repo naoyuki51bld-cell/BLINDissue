@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { PIECE_EVENTS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { labelOf, pairReading, pairText } from '../data/labels';
-import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '../data/store';
+import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
+import { loadSuggestions } from './suggestions';
 import { avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
 import { cachedVerify, PieceTabs, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
@@ -69,6 +70,7 @@ export function AlgsView() {
           {STATUSES.map((s) => `${STATUS_LABEL[s]} ${stats.byStatus[s]}`).join(' / ')}
         </div>
         <ProgressBar counts={STATUSES.map((s) => stats.byStatus[s])} />
+        <BulkFill key={`${pt}-${cfg.buffer}`} pt={pt} missing={rows.filter((r) => !r.main).map((r) => [r.a, r.b] as [StickerId, StickerId])} />
       </div>
 
       <div className="toolbar">
@@ -136,6 +138,39 @@ export function AlgsView() {
       )}
 
       {editing && <AlgEditor pt={pt} a={editing[0]} b={editing[1]} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function BulkFill({ pt, missing }: { pt: PieceType; missing: [StickerId, StickerId][] }) {
+  const cfg = useStore((s) => s.pieces[pt]);
+  const setAlgsBulk = useStore((s) => s.setAlgsBulk);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  if (missing.length === 0 && !message) return null;
+  return (
+    <div className="row wrap">
+      {missing.length > 0 && <button
+        className="btn small"
+        disabled={busy}
+        onClick={async () => {
+          if (!confirm(`手順が未登録の ${missing.length} ケースに、おすすめ手順の 1 番目をまとめて登録します。あとから 1 つずつ選び直せます。よろしいですか？`)) return;
+          setBusy(true);
+          const table = await loadSuggestions(pt, cfg.size, cfg.buffer);
+          const patch: Record<string, Partial<AlgEntry>> = {};
+          for (const [a, b] of missing) {
+            const top = table[`${a}|${b}`]?.[0];
+            if (top) patch[algKey(pt, cfg.buffer, a, b)] = { algs: [top.alg], main: 0 };
+          }
+          setAlgsBulk(patch);
+          setBusy(false);
+          const n = Object.keys(patch).length;
+          setMessage(`${n} ケースに登録しました${n < missing.length ? `（${missing.length - n} ケースは候補が見つからず未登録のままです）` : ''}。`);
+        }}
+      >
+        {busy ? '計算中…' : `未登録の ${missing.length} ケースにおすすめ手順を一括登録`}
+      </button>}
+      {message && <span className="muted small">{message}</span>}
     </div>
   );
 }

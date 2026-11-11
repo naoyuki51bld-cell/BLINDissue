@@ -7,6 +7,7 @@ import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { avgExecTime, avgTime, formatSec } from '../data/srs';
 import { CubeNet } from './CubeNet';
+import { useSuggestions } from './suggestions';
 import { cachedVerify, Modal, VerifyBadge } from './shared';
 
 interface Props {
@@ -23,6 +24,64 @@ function expansion(text: string): { text: string; count: number } | null {
   } catch {
     return null;
   }
+}
+
+function SuggestionList({
+  pt,
+  a,
+  b,
+  current,
+  onPick,
+}: {
+  pt: PieceType;
+  a: StickerId;
+  b: StickerId;
+  current: string[];
+  onPick: (alg: string, asMain: boolean) => void;
+}) {
+  const cfg = useStore((s) => s.pieces[pt]);
+  const table = useSuggestions(pt, cfg.size, cfg.buffer);
+  const [open, setOpen] = useState(true);
+  const list = table?.[`${a}|${b}`] ?? [];
+  const have = new Set(current.map((x) => x.replace(/\s+/g, ' ').trim()));
+  return (
+    <div className="suggest">
+      <button className="suggest-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="field-label">おすすめ手順（自動生成）</span>
+        <span className="muted small">{open ? '閉じる' : '開く'}</span>
+      </button>
+      {open && (
+        <>
+          {!table && <p className="muted small">候補を計算しています…（初回のみ数秒かかります）</p>}
+          {table && list.length === 0 && (
+            <p className="muted small">このケースは短い交換子では見つかりませんでした（9 手以上の特殊な手順が必要なケースです）。下の欄に手入力してください。</p>
+          )}
+          <ul className="suggest-list">
+            {list.map((s) => {
+              const added = have.has(s.alg);
+              return (
+                <li key={s.alg}>
+                  <span className="suggest-alg">{s.alg}</span>
+                  <span className="muted small">{s.moves} 手</span>
+                  <span className="row">
+                    <button className="btn small primary" disabled={added} onClick={() => onPick(s.alg, true)}>
+                      {added ? '追加済み' : 'メインにする'}
+                    </button>
+                    {!added && (
+                      <button className="btn small" onClick={() => onPick(s.alg, false)}>
+                        候補に追加
+                      </button>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {list.length > 0 && <p className="muted small">手数と回しやすさ（R・U 中心か、B や S が少ないか）で並べています。</p>}
+        </>
+      )}
+    </div>
+  );
 }
 
 export function AlgEditor({ pt, a, b, onClose }: Props) {
@@ -98,6 +157,24 @@ export function AlgEditor({ pt, a, b, onClose }: Props) {
           </label>
         </div>
         <div className="stack">
+          <SuggestionList
+            pt={pt}
+            a={a}
+            b={b}
+            current={algs}
+            onPick={(alg, asMain) => {
+              const empty = algs.findIndex((x) => !x.trim());
+              if (empty >= 0) {
+                setAlgs(algs.map((x, j) => (j === empty ? alg : x)));
+                if (asMain) setMain(empty);
+              } else {
+                setAlgs([...algs, alg]);
+                if (asMain) setMain(algs.length);
+              }
+              if (status === 'none') setStatus('learning');
+            }}
+          />
+          <div className="field-label">登録した手順（自分で書くこともできます）</div>
           {algs.map((text, i) => {
             const v = cachedVerify(pt, cfg, a, b, text);
             const ex = text.trim() ? expansion(text) : null;
