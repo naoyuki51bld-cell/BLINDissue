@@ -59,4 +59,4 @@ npm test         # テスト
 npm run build    # 本番ビルド（dist/）
 ```
 
-`main` ブランチに push すると GitHub Actions で GitHub Pages に公開されます（リポジトリの Settings → Pages で Source を「GitHub Actions」にしてください）。
+push すると GitHub Actions でビルドされ、GitHub Pages（https://naoyuki51bld-cell.github.io/BLINDissue/）に公開されます。リポジトリの Settings → Pages で Source を「GitHub Actions」にしてください。
