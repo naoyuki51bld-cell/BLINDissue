@@ -84,7 +84,7 @@ interface Actions {
   deleteAlg: (key: string) => void;
   setPair: (pair: string, patch: Partial<PairEntry>) => void;
   setPairsBulk: (entries: Record<string, Partial<PairEntry>>) => void;
-  recordReview: (key: string, grade: Grade, timeMs: number) => void;
+  recordReview: (key: string, grade: Grade, timeMs: number, execMs?: number) => void;
   resetReview: (key: string) => void;
   replaceAll: (data: AppData) => void;
 }
@@ -132,8 +132,8 @@ export const useStore = create<AppData & Actions>()(
             pairs[k] = { ...(pairs[k] ?? emptyPair()), ...patch, updatedAt: Date.now() };
           return { pairs };
         }),
-      recordReview: (key, grade, timeMs) =>
-        setState((s) => ({ reviews: { ...s.reviews, [key]: review(s.reviews[key], grade, timeMs) } })),
+      recordReview: (key, grade, timeMs, execMs) =>
+        setState((s) => ({ reviews: { ...s.reviews, [key]: review(s.reviews[key], grade, timeMs, Date.now(), execMs) } })),
       resetReview: (key) =>
         setState((s) => {
           const reviews = { ...s.reviews };

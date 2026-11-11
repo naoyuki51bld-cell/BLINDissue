@@ -4,12 +4,16 @@ import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, pairReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '../data/store';
 import { avgTime, formatSec, isDue, type Grade, type ReviewState } from '../data/srs';
 import { PieceTabs, useCases, usePersisted, useTargets } from './shared';
+import { SmartCubePanel, SmartSession, smartDebug } from './SmartPractice';
+import { useSmartCube } from '../smartcube/connection';
 
 type Content = 'alg' | 'pair';
 type Scope = 'due' | 'all' | 'weak' | 'new';
 
-interface Card {
+export interface Card {
   reviewKey: string;
+  /** 手順カードのとき: スマートキューブで判定するためのケース */
+  target?: { pt: PieceType; buffer: StickerId; a: StickerId; b: StickerId };
   prompt: string;
   reading: string | null;
   sub: string;
@@ -17,20 +21,22 @@ interface Card {
   memo: string;
 }
 
-interface Result {
+export interface Result {
   card: Card;
   time: number;
   grade: Grade;
+  /** スマートキューブ練習での実行時間 */
+  exec?: number;
 }
 
-const GRADES: { g: Grade; label: string; key: string }[] = [
+export const GRADES: { g: Grade; label: string; key: string }[] = [
   { g: 0, label: 'もう一度', key: '1' },
   { g: 1, label: '難しい', key: '2' },
   { g: 2, label: '普通', key: '3' },
   { g: 3, label: '簡単', key: '4' },
 ];
 
-function shuffle<T>(arr: T[]): T[] {
+export function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -54,7 +60,11 @@ export function PracticeView() {
   const [limit, setLimit] = usePersisted<number>('practice.limit', 30);
   const [slowSec, setSlowSec] = usePersisted<number>('practice.slow', 2);
   const [session, setSession] = useState<Card[] | null>(null);
+  const [smart, setSmart] = usePersisted<boolean>('practice.smart', false);
+  const smartAvailable = content === 'alg' && (pt === 'corner' || pt === 'edge');
+  const useSmart = smart && smartAvailable;
 
+  const smartStatus = useSmartCube((s) => s.status);
   const cfg = useStore((s) => s.pieces[pt]);
   const algs = useStore((s) => s.algs);
   const pairs = useStore((s) => s.pairs);
@@ -75,7 +85,7 @@ export function PracticeView() {
         const e = algs[key];
         if (!e || !e.algs.length) continue;
         const rk = algReviewKey(key);
-        cards.push({ reviewKey: rk, prompt: pair, reading, sub, answer: [e.algs[e.main], ...e.algs.filter((_, i) => i !== e.main)], memo: e.memo, review: reviews[rk], status: e.status });
+        cards.push({ reviewKey: rk, target: { pt, buffer: cfg.buffer, a, b }, prompt: pair, reading, sub, answer: [e.algs[e.main], ...e.algs.filter((_, i) => i !== e.main)], memo: e.memo, review: reviews[rk], status: e.status });
       } else {
         if (seenPairs.has(pair)) continue;
         seenPairs.add(pair);
@@ -103,6 +113,17 @@ export function PracticeView() {
     setSession(shuffle(cards).slice(0, limit > 0 ? limit : undefined));
   };
 
+  if (session && useSmart)
+    return (
+      <SmartSession
+        cards={session}
+        slowMs={slowSec * 1000}
+        title={`${PIECE_LABEL[pt]}・スマートキューブ`}
+        onExit={() => setSession(null)}
+        onRetry={(cards) => setSession(shuffle(cards))}
+      />
+    );
+
   if (session)
     return (
       <Session
@@ -114,6 +135,7 @@ export function PracticeView() {
       />
     );
 
+  const smartReady = smartStatus === 'connected' || smartDebug();
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
   return (
@@ -194,7 +216,17 @@ export function PracticeView() {
             </select>
           </label>
         </div>
-        <button className="btn primary big" disabled={filtered.length === 0} onClick={() => start(filtered)}>
+        {content === 'alg' && (
+          <div className="stack">
+            <label className="check">
+              <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} disabled={!smartAvailable} />
+              スマートキューブで回して答える（自動で正誤判定・実行時間を計測）
+            </label>
+            {!smartAvailable && smart && <p className="muted small">スマートキューブは 3x3 なので、コーナーとエッジのみ使えます。</p>}
+            {useSmart && <SmartCubePanel />}
+          </div>
+        )}
+        <button className="btn primary big" disabled={filtered.length === 0 || (useSmart && !smartReady)} onClick={() => start(filtered)}>
           {filtered.length === 0 ? '出題できるものがありません' : `練習を始める（${Math.min(filtered.length, limit || filtered.length)} / ${filtered.length}）`}
         </button>
         {pool.length === 0 && (
@@ -330,7 +362,9 @@ function Session({
   );
 }
 
-function Summary({ results, slowMs, onExit, onRetry }: { results: Result[]; slowMs: number; onExit: () => void; onRetry: (cards: Card[]) => void }) {
+const avgOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+export function Summary({ results, slowMs, onExit, onRetry }: { results: Result[]; slowMs: number; onExit: () => void; onRetry: (cards: Card[]) => void }) {
   const avg = results.length ? results.reduce((a, r) => a + r.time, 0) / results.length : null;
   const weak = [...new Map(results.filter((r) => r.grade <= 1 || r.time > slowMs).map((r) => [r.card.reviewKey, r])).values()];
   const sorted = results.slice().sort((a, b) => b.time - a.time);
@@ -345,8 +379,14 @@ function Summary({ results, slowMs, onExit, onRetry }: { results: Result[]; slow
           </div>
           <div>
             <strong>{formatSec(avg)}</strong>
-            <span>平均（秒）</span>
+            <span>{results.some((r) => r.exec !== undefined) ? '平均想起（秒）' : '平均（秒）'}</span>
           </div>
+          {results.some((r) => r.exec !== undefined) && (
+            <div>
+              <strong>{formatSec(avgOf(results.filter((r) => r.exec !== undefined).map((r) => r.exec!)))}</strong>
+              <span>平均実行（秒）</span>
+            </div>
+          )}
           <div>
             <strong>{results.filter((r) => r.grade === 0).length}</strong>
             <span>もう一度</span>
@@ -377,6 +417,7 @@ function Summary({ results, slowMs, onExit, onRetry }: { results: Result[]; slow
             <span className="case-alg">{r.card.answer[0]}</span>
             <span className="case-meta">
               <span className={r.time > slowMs ? 'time slow' : 'time'}>{formatSec(r.time)}s</span>
+              {r.exec !== undefined && <span className="time muted">+{formatSec(r.exec)}s</span>}
               <span className={`gtag g${r.grade}`}>{GRADES[r.grade].label}</span>
             </span>
           </li>

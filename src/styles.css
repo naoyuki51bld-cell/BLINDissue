@@ -947,3 +947,57 @@ details summary {
   cursor: pointer;
   margin-bottom: 8px;
 }
+
+/* smart cube */
+.smart-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.conn-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--st-none);
+}
+.conn-dot.connected {
+  background: var(--ok);
+}
+.conn-dot.connecting {
+  background: var(--st-learning);
+}
+.flashcard.smart {
+  cursor: default;
+}
+.moves {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  min-height: 1.6em;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.mv {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+.mv.off {
+  background: var(--danger);
+  color: #fff;
+}
+.last-result {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.last-result.ok {
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+.last-result.ng {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+.grow {
+  flex: 1;
+}

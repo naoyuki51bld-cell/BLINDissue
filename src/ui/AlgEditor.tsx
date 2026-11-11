@@ -5,7 +5,7 @@ import { stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { stateAfter } from '../cube/verify';
 import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
-import { avgTime, formatSec } from '../data/srs';
+import { avgExecTime, avgTime, formatSec } from '../data/srs';
 import { CubeNet } from './CubeNet';
 import { cachedVerify, Modal, VerifyBadge } from './shared';
 
@@ -183,7 +183,8 @@ export function AlgEditor({ pt, a, b, onClose }: Props) {
           </label>
           {reviewState && (
             <p className="muted small">
-              練習 {reviewState.reps + reviewState.lapses} 回 ・ 平均想起 {formatSec(avgTime(reviewState))} 秒 ・ ミス {reviewState.lapses} 回{' '}
+              練習 {reviewState.reps + reviewState.lapses} 回 ・ 平均想起 {formatSec(avgTime(reviewState))} 秒
+              {avgExecTime(reviewState) !== null && ` ・ 平均実行 ${formatSec(avgExecTime(reviewState))} 秒`} ・ ミス {reviewState.lapses} 回{' '}
               <button className="link" onClick={() => resetReview(algReviewKey(key))}>
                 記録をリセット
               </button>

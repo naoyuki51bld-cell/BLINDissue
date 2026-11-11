@@ -8,6 +8,7 @@ export interface ReviewState {
   reps: number;
   lapses: number;
   times: number[]; // 直近の想起時間 ms（最大 10）
+  execTimes?: number[]; // 直近の実行時間 ms（スマートキューブ練習のみ、最大 10）
   lastGrade?: Grade;
   lastReviewed?: number;
 }
@@ -18,9 +19,10 @@ export function newReview(): ReviewState {
   return { ease: 2.5, interval: 0, due: 0, reps: 0, lapses: 0, times: [] };
 }
 
-export function review(prev: ReviewState | undefined, grade: Grade, timeMs: number, now = Date.now()): ReviewState {
+export function review(prev: ReviewState | undefined, grade: Grade, timeMs: number, now = Date.now(), execMs?: number): ReviewState {
   const r = { ...(prev ?? newReview()) };
   r.times = [...r.times, Math.round(timeMs)].slice(-10);
+  if (execMs !== undefined) r.execTimes = [...(r.execTimes ?? []), Math.round(execMs)].slice(-10);
   r.lastGrade = grade;
   r.lastReviewed = now;
   if (grade === 0) {
@@ -44,6 +46,13 @@ export function review(prev: ReviewState | undefined, grade: Grade, timeMs: numb
 export function avgTime(r: ReviewState | undefined): number | null {
   if (!r || r.times.length === 0) return null;
   const recent = r.times.slice(-5);
+  return recent.reduce((a, b) => a + b, 0) / recent.length;
+}
+
+export function avgExecTime(r: ReviewState | undefined): number | null {
+  const t = r?.execTimes;
+  if (!t || t.length === 0) return null;
+  const recent = t.slice(-5);
   return recent.reduce((a, b) => a + b, 0) / recent.length;
 }
 

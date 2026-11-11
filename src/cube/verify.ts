@@ -90,6 +90,18 @@ export function verifyAlg(
   } catch (e) {
     return { kind: 'error', message: e instanceof ParseError ? e.message : String(e) };
   }
+  return verifyState(pt, n, state, buffer, a, b);
+}
+
+/** 揃った状態からの変化 state が「バッファ → A → B」の 3-cycle か */
+export function verifyState(
+  pt: PieceType,
+  n: number,
+  state: CubeState,
+  buffer: StickerId,
+  a: StickerId,
+  b: StickerId,
+): VerifyResult {
   const expected = expectedColors(pt, n, buffer, a, b);
   for (const { state: s, rotated } of normalizations(state, n)) {
     if (sameColors(colors(s, n), expected)) return { kind: 'ok', rotation: rotated };

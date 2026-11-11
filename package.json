@@ -20,10 +20,12 @@
   },
   "homepage": "https://github.com/naoyuki51bld-cell/BLINDissue#readme",
   "dependencies": {
+    "gan-web-bluetooth": "^3.0.2",
     "idb-keyval": "^6.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "read-excel-file": "^5.8.6",
+    "rxjs": "^7.8.1",
     "write-excel-file": "^2.0.10",
     "zustand": "^4.5.5"
   },
