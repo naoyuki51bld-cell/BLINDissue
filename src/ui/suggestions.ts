@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { generateSuggestions, suggestionsToObject, type SuggestionTable } from '../cube/generator';
 import type { PieceType, StickerId } from '../cube/pieces';
+import { elliottBuffers, elliottTable, loadElliott } from '../data/elliott';
 
 const cache = new Map<string, Promise<SuggestionTable>>();
 let worker: Worker | null = null;
@@ -50,4 +51,34 @@ export function useSuggestions(pt: PieceType, n: number, buffer: StickerId): Sug
     };
   }, [pt, n, buffer]);
   return table;
+}
+
+/** Elliott の手順表（そのパーツ・バッファの表が無ければ null、読み込み中は undefined） */
+export function useElliottTable(pt: PieceType, buffer: StickerId): Record<string, string> | null | undefined {
+  const [table, setTable] = useState<Record<string, string> | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    setTable(undefined);
+    if (pt !== 'corner' && pt !== 'edge') {
+      setTable(null);
+      return;
+    }
+    loadElliott().then((d) => alive && setTable(elliottTable(d, pt, buffer)));
+    return () => {
+      alive = false;
+    };
+  }, [pt, buffer]);
+  return table;
+}
+
+export function useElliottBuffers(pt: PieceType): StickerId[] {
+  const [list, setList] = useState<StickerId[]>([]);
+  useEffect(() => {
+    let alive = true;
+    loadElliott().then((d) => alive && setList(elliottBuffers(d, pt)));
+    return () => {
+      alive = false;
+    };
+  }, [pt]);
+  return list;
 }

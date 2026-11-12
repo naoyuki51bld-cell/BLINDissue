@@ -5,7 +5,9 @@ export type Node =
   | { type: 'move'; token: string; amount: number }
   | { type: 'group'; items: Node[]; amount: number }
   | { type: 'comm'; a: Node[]; b: Node[]; amount: number }
-  | { type: 'conj'; a: Node[]; b: Node[]; amount: number };
+  | { type: 'conj'; a: Node[]; b: Node[]; amount: number }
+  /** [a/b] = a b a2 b' a */
+  | { type: 'slash'; a: Node[]; b: Node[]; amount: number };
 
 export class ParseError extends Error {
   constructor(
@@ -30,12 +32,37 @@ export function normalizeAlgText(text: string): string {
 const MOVE_RE = /^(?:(\d+)(?:-(\d+))?)?([RLUDFB]w|[RLUDFBrludfbMESxyz])/;
 const SUFFIX_RE = /^(\d+)?('?)/;
 
+/**
+ * 括弧を省いた書き方を括弧付きに直す（例: "R2 U': R2, S" → "[R2 U': [R2, S]]"、"a/b" → "[a/b]"）。
+ * 「+」でつないだ複数の部分はそれぞれ変換して並べる。
+ */
+export function bracketize(text: string): string {
+  const s = normalizeAlgText(text).trim();
+  if (s.includes('[') || !/[,:/]/.test(s)) return s;
+  const inner = (x: string) => {
+    const t = x.trim();
+    const comma = t.indexOf(',');
+    if (comma >= 0) return `[${t.slice(0, comma).trim()}, ${t.slice(comma + 1).trim()}]`;
+    const slash = t.indexOf('/');
+    if (slash >= 0) return `[${t.slice(0, slash).trim()}/${t.slice(slash + 1).trim()}]`;
+    return t;
+  };
+  return s
+    .split('+')
+    .map((part) => {
+      const colon = part.indexOf(':');
+      if (colon >= 0) return `[${part.slice(0, colon).trim()}: ${inner(part.slice(colon + 1))}]`;
+      return inner(part);
+    })
+    .join(' ');
+}
+
 export function parseAlg(input: string): Node[] {
-  const s = normalizeAlgText(input);
+  const s = bracketize(input);
   let i = 0;
 
   const skipWs = () => {
-    while (i < s.length && /[\s.*]/.test(s[i])) i++;
+    while (i < s.length && /[\s.*+]/.test(s[i])) i++;
   };
 
   const readSuffix = (): number => {
@@ -68,14 +95,14 @@ export function parseAlg(input: string): Node[] {
       if (ch === '[') {
         const start = i;
         i++;
-        const a = parseSeq(',:]');
+        const a = parseSeq(',:/]');
         const sep = s[i];
-        if (sep === ']') throw new ParseError('[ ] の中に「,」か「:」が必要です', start);
+        if (sep === ']') throw new ParseError('[ ] の中に「,」「:」「/」のどれかが必要です', start);
         i++;
         const b = parseSeq(']');
         i++; // ]
         const amount = readSuffix();
-        items.push({ type: sep === ',' ? 'comm' : 'conj', a, b, amount });
+        items.push({ type: sep === ',' ? 'comm' : sep === '/' ? 'slash' : 'conj', a, b, amount });
         continue;
       }
       if (ch === '(') {
@@ -86,7 +113,7 @@ export function parseAlg(input: string): Node[] {
         items.push({ type: 'group', items: inner, amount });
         continue;
       }
-      if (ch === ']' || ch === ')' || ch === ',' || ch === ':')
+      if (ch === ']' || ch === ')' || ch === ',' || ch === ':' || ch === '/')
         throw new ParseError(`予期しない「${ch}」`, i);
       const m = MOVE_RE.exec(s.slice(i));
       if (!m) throw new ParseError(`読めない記号「${ch}」`, i);
@@ -189,6 +216,12 @@ export function flatten(nodes: Node[]): FlatMove[] {
         out.push(...repeat([...a, ...b, ...invertSeq(a)], node.amount));
         break;
       }
+      case 'slash': {
+        const a = flatten(node.a);
+        const b = flatten(node.b);
+        out.push(...repeat([...a, ...b, ...a, ...a, ...invertSeq(b), ...a], node.amount));
+        break;
+      }
     }
   }
   return out;
@@ -239,6 +272,8 @@ export function nodesToString(nodes: Node[]): string {
           return `[${nodesToString(n.a)}, ${nodesToString(n.b)}]${amountSuffix(n.amount)}`;
         case 'conj':
           return `[${nodesToString(n.a)}: ${nodesToString(n.b)}]${amountSuffix(n.amount)}`;
+        case 'slash':
+          return `[${nodesToString(n.a)}/${nodesToString(n.b)}]${amountSuffix(n.amount)}`;
       }
     })
     .join(' ');
@@ -255,6 +290,9 @@ function invertNode(n: Node): Node {
       return { ...n, a: n.b, b: n.a };
     case 'conj':
       return { ...n, b: invertNodes(n.b) };
+    case 'slash':
+      // (a b a2 b' a)' = a' b a2 b' a'
+      return { ...n, a: invertNodes(n.a) };
   }
 }
 

@@ -7,7 +7,8 @@ import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { avgExecTime, avgTime, formatSec } from '../data/srs';
 import { CubeNet } from './CubeNet';
-import { useSuggestions } from './suggestions';
+import { useElliottTable, useSuggestions } from './suggestions';
+import { ELLIOTT_NAME } from '../data/elliott';
 import { cachedVerify, Modal, VerifyBadge } from './shared';
 
 interface Props {
@@ -21,6 +22,14 @@ function expansion(text: string): { text: string; count: number } | null {
   try {
     const flat = cancel(flatten(parseAlg(text)));
     return { text: flatToString(flat), count: moveCount(text) };
+  } catch {
+    return null;
+  }
+}
+
+function safeMoveCount(text: string): number | null {
+  try {
+    return moveCount(text);
   } catch {
     return null;
   }
@@ -41,18 +50,24 @@ function SuggestionList({
 }) {
   const cfg = useStore((s) => s.pieces[pt]);
   const table = useSuggestions(pt, cfg.size, cfg.buffer);
+  const elliott = useElliottTable(pt, cfg.buffer);
   const [open, setOpen] = useState(true);
-  const list = table?.[`${a}|${b}`] ?? [];
+  const fromSheet = elliott?.[`${a}|${b}`];
+  const generated = table?.[`${a}|${b}`] ?? [];
+  const list: { alg: string; moves: number | null; source?: string }[] = [
+    ...(fromSheet ? [{ alg: fromSheet, moves: safeMoveCount(fromSheet), source: ELLIOTT_NAME }] : []),
+    ...generated.filter((g) => g.alg !== fromSheet),
+  ];
   const have = new Set(current.map((x) => x.replace(/\s+/g, ' ').trim()));
   return (
     <div className="suggest">
       <button className="suggest-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className="field-label">おすすめ手順（自動生成）</span>
+        <span className="field-label">おすすめ手順</span>
         <span className="muted small">{open ? '閉じる' : '開く'}</span>
       </button>
       {open && (
         <>
-          {!table && <p className="muted small">候補を計算しています…（初回のみ数秒かかります）</p>}
+          {!table && !fromSheet && <p className="muted small">候補を計算しています…（初回のみ数秒かかります）</p>}
           {table && list.length === 0 && (
             <p className="muted small">このケースは短い交換子では見つかりませんでした（9 手以上の特殊な手順が必要なケースです）。下の欄に手入力してください。</p>
           )}
@@ -61,8 +76,11 @@ function SuggestionList({
               const added = have.has(s.alg);
               return (
                 <li key={s.alg}>
-                  <span className="suggest-alg">{s.alg}</span>
-                  <span className="muted small">{s.moves} 手</span>
+                  <span className="suggest-alg">
+                    {s.source && <span className="source-tag">{s.source}</span>}
+                    {s.alg}
+                  </span>
+                  <span className="muted small">{s.moves !== null ? `${s.moves} 手` : ''}</span>
                   <span className="row">
                     <button className="btn small primary" disabled={added} onClick={() => onPick(s.alg, true)}>
                       {added ? '追加済み' : 'メインにする'}
@@ -77,7 +95,12 @@ function SuggestionList({
               );
             })}
           </ul>
-          {list.length > 0 && <p className="muted small">手数と回しやすさ（R・U 中心か、B や S が少ないか）で並べています。</p>}
+          {list.length > 0 && (
+            <p className="muted small">
+              {fromSheet && 'Elliott の手順表（Full Floating & More）の手順を先頭に、'}
+              自動生成の候補は手数と回しやすさ（R・U 中心か、B や S が少ないか）で並べています。
+            </p>
+          )}
         </>
       )}
     </div>

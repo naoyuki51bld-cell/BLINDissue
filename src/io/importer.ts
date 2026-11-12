@@ -1,6 +1,7 @@
 // スプレッドシートの表から手順・レターペアを読み取る
 import { samePiece, STICKER_IDS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import type { PieceConfig } from '../data/store';
+import { verifyAlg } from '../cube/verify';
 import type { Table } from './table';
 
 export interface Matcher {
@@ -68,6 +69,8 @@ export interface ImportedAlg {
 
 export interface AlgImportResult {
   mode: 'matrix' | 'list';
+  /** 表形式で「上の行 = 1 文字目」と判定して読み替えたか */
+  transposed?: boolean;
   entries: ImportedAlg[];
   unmatched: string[];
   skippedInvalid: string[];
@@ -142,6 +145,20 @@ export function importAlgTable(pt: PieceType, cfg: PieceConfig, table: Table): A
         const algs = splitAlgCell(cell);
         if (algs.length) entries.push({ a, b, algs });
       });
+    }
+    // 行と列のどちらが 1 文字目かは表によって違うので、手順を実際に検証して多く合う向きを採用する
+    const sample = entries.slice(0, 80);
+    const okCount = (list: ImportedAlg[]) =>
+      list.filter((e) => verifyAlg(pt, cfg.size, e.algs[0], buffer, e.a, e.b).kind === 'ok').length;
+    const swapped = sample.map((e) => ({ ...e, a: e.b, b: e.a }));
+    if (okCount(swapped) > okCount(sample)) {
+      return {
+        mode: 'matrix',
+        transposed: true,
+        entries: entries.map((e) => ({ ...e, a: e.b, b: e.a })),
+        unmatched: [...unmatched],
+        skippedInvalid,
+      };
     }
     return { mode: 'matrix', entries, unmatched: [...unmatched], skippedInvalid };
   }

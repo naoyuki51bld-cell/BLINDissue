@@ -16,6 +16,13 @@ describe('importer', () => {
     expect(res.entries.map((e) => `${e.a}${e.b}`).sort()).toEqual(['L0U1', 'U1U0']);
     expect(res.skippedInvalid).toEqual(['おあ']);
   });
+  it('detects sheets whose header row is the first target', () => {
+    // [R U R', D] はバッファ UFR → RDF → FDL。上の行を 1 文字目にした表
+    const csv = [',た,あ', "し,\"[R U R', D]\","].join('\n');
+    const res = importAlgTable('corner', cfg.corner, parseDelimited(csv));
+    expect(res.transposed).toBe(true);
+    expect(res.entries[0]).toMatchObject({ a: 'R3', b: 'F3' });
+  });
   it('reads a list with pair strings and position names', () => {
     const tsv = "AB\t[M', U2]\tメモ\nUB-UL\t[U R U', M']\nXY\tR";
     const res = importAlgTable('edge', cfg.edge, parseDelimited(tsv));

@@ -149,6 +149,7 @@ export function ImportPanel() {
         <div className="preview stack">
           <p>
             <b>{algResult.mode === 'matrix' ? '表形式' : 'リスト形式'}</b>として {algResult.entries.length} ケースを読み取りました。
+            {algResult.transposed && '（手順を検証した結果、上の行を 1 文字目・左の列を 2 文字目として読みました）'}
           </p>
           {algResult.unmatched.length > 0 && (
             <p className="warn small">文字の割り振りと一致しなかった見出し: {algResult.unmatched.slice(0, 30).join('、')}{algResult.unmatched.length > 30 ? ' …' : ''}</p>

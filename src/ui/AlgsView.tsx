@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { PIECE_EVENTS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
+import { PIECE_EVENTS, STICKER_IDS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
-import { loadSuggestions } from './suggestions';
+import { loadSuggestions, useElliottBuffers, useElliottTable } from './suggestions';
 import { avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
 import { cachedVerify, PieceTabs, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
@@ -66,11 +66,12 @@ export function AlgsView() {
           )}
         </div>
         <div className="muted small">
-          バッファ {stickerName(pt, cfg.buffer)}（{labelOf(pt, cfg, cfg.buffer)}）・{PIECE_EVENTS[pt]}・
+          {PIECE_EVENTS[pt]}・
           {STATUSES.map((s) => `${STATUS_LABEL[s]} ${stats.byStatus[s]}`).join(' / ')}
         </div>
         <ProgressBar counts={STATUSES.map((s) => stats.byStatus[s])} />
-        <BulkFill key={`${pt}-${cfg.buffer}`} pt={pt} missing={rows.filter((r) => !r.main).map((r) => [r.a, r.b] as [StickerId, StickerId])} />
+        <BufferPicker pt={pt} />
+        <BulkFill key={`${pt}-${cfg.buffer}`} pt={pt} cases={cases} />
       </div>
 
       <div className="toolbar">
@@ -142,36 +143,99 @@ export function AlgsView() {
   );
 }
 
-function BulkFill({ pt, missing }: { pt: PieceType; missing: [StickerId, StickerId][] }) {
+function BulkFill({ pt, cases }: { pt: PieceType; cases: [StickerId, StickerId][] }) {
   const cfg = useStore((s) => s.pieces[pt]);
+  const algs = useStore((s) => s.algs);
   const setAlgsBulk = useStore((s) => s.setAlgsBulk);
+  const elliott = useElliottTable(pt, cfg.buffer);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  if (missing.length === 0 && !message) return null;
+  const missing = cases.filter(([a, b]) => !algs[algKey(pt, cfg.buffer, a, b)]?.algs.length);
+  const elliottCount = elliott ? cases.filter(([a, b]) => elliott[`${a}|${b}`]).length : 0;
+  const notMain = elliott
+    ? cases.filter(([a, b]) => {
+        const alg = elliott[`${a}|${b}`];
+        const e = algs[algKey(pt, cfg.buffer, a, b)];
+        return alg && (!e || e.algs[e.main] !== alg);
+      })
+    : [];
+
+  const fillMissing = async () => {
+    const src = elliott ? 'Elliott の手順表（無いケースは自動生成の候補）' : 'おすすめ手順の 1 番目';
+    if (!confirm(`手順が未登録の ${missing.length} ケースに、${src}をまとめて登録します。あとから 1 つずつ選び直せます。よろしいですか？`)) return;
+    setBusy(true);
+    const table = await loadSuggestions(pt, cfg.size, cfg.buffer);
+    const patch: Record<string, Partial<AlgEntry>> = {};
+    let fromElliott = 0;
+    for (const [a, b] of missing) {
+      const e = elliott?.[`${a}|${b}`];
+      const top = e ?? table[`${a}|${b}`]?.[0]?.alg;
+      if (e) fromElliott++;
+      if (top) patch[algKey(pt, cfg.buffer, a, b)] = { algs: [top], main: 0 };
+    }
+    setAlgsBulk(patch);
+    setBusy(false);
+    const n = Object.keys(patch).length;
+    setMessage(
+      `${n} ケースに登録しました${elliott ? `（Elliott ${fromElliott}・自動生成 ${n - fromElliott}）` : ''}` +
+        `${n < missing.length ? `。${missing.length - n} ケースは候補が見つからず未登録のままです` : ''}。`,
+    );
+  };
+
+  const useElliott = () => {
+    if (!elliott) return;
+    if (!confirm(`${notMain.length} ケースのメイン手順を Elliott の手順表のものにします。今の手順は消さずに「候補」として残します。よろしいですか？`)) return;
+    const patch: Record<string, Partial<AlgEntry>> = {};
+    for (const [a, b] of notMain) {
+      const key = algKey(pt, cfg.buffer, a, b);
+      const alg = elliott[`${a}|${b}`];
+      const cur = algs[key]?.algs ?? [];
+      patch[key] = { algs: [alg, ...cur.filter((x) => x !== alg)], main: 0 };
+    }
+    setAlgsBulk(patch);
+    setMessage(`${notMain.length} ケースのメイン手順を Elliott の手順にしました。`);
+  };
+
+  if (missing.length === 0 && notMain.length === 0 && !message && !elliott) return null;
   return (
-    <div className="row wrap">
-      {missing.length > 0 && <button
-        className="btn small"
-        disabled={busy}
-        onClick={async () => {
-          if (!confirm(`手順が未登録の ${missing.length} ケースに、おすすめ手順の 1 番目をまとめて登録します。あとから 1 つずつ選び直せます。よろしいですか？`)) return;
-          setBusy(true);
-          const table = await loadSuggestions(pt, cfg.size, cfg.buffer);
-          const patch: Record<string, Partial<AlgEntry>> = {};
-          for (const [a, b] of missing) {
-            const top = table[`${a}|${b}`]?.[0];
-            if (top) patch[algKey(pt, cfg.buffer, a, b)] = { algs: [top.alg], main: 0 };
-          }
-          setAlgsBulk(patch);
-          setBusy(false);
-          const n = Object.keys(patch).length;
-          setMessage(`${n} ケースに登録しました${n < missing.length ? `（${missing.length - n} ケースは候補が見つからず未登録のままです）` : ''}。`);
-        }}
-      >
-        {busy ? '計算中…' : `未登録の ${missing.length} ケースにおすすめ手順を一括登録`}
-      </button>}
+    <div className="stack">
+      {elliott && (
+        <p className="muted small">
+          このバッファには Elliott の手順表があります（{elliottCount} ケース）。
+        </p>
+      )}
+      <div className="row wrap">
+        {missing.length > 0 && (
+          <button className="btn small" disabled={busy} onClick={fillMissing}>
+            {busy ? '計算中…' : `未登録の ${missing.length} ケースにおすすめ手順を一括登録`}
+          </button>
+        )}
+        {elliott && notMain.length > 0 && (
+          <button className="btn small" onClick={useElliott}>
+            Elliott の手順をメインにする（{notMain.length} ケース）
+          </button>
+        )}
+      </div>
       {message && <span className="muted small">{message}</span>}
     </div>
+  );
+}
+
+function BufferPicker({ pt }: { pt: PieceType }) {
+  const cfg = useStore((s) => s.pieces[pt]);
+  const setPiece = useStore((s) => s.setPiece);
+  const withSheet = useElliottBuffers(pt);
+  return (
+    <label className="field inline">
+      <span className="field-label">バッファ</span>
+      <select value={cfg.buffer} onChange={(e) => setPiece(pt, { buffer: e.target.value })}>
+        {STICKER_IDS.map((id) => (
+          <option key={id} value={id}>
+            {stickerName(pt, id)}（{labelOf(pt, cfg, id)}）{withSheet.includes(id) ? ' ・Elliott 表あり' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
