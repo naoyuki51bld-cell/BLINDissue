@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { defaultData } from '../data/store';
 import { labelsFromList, interleave, romajiToKana } from '../data/schemes';
 import { importAlgTable, importPairTable, makeMatcher } from './importer';
+import { pairReading, pairText } from '../data/labels';
+import { applyMoves, solved } from '../cube/cube';
+import { toBaseMoves } from '../cube/notation';
+import { detectCase } from '../cube/verify';
+
+const detect = (alg: string) => detectCase('edge', 3, applyMoves(solved(3), 3, toBaseMoves(alg, 3)), 'U2')!;
 import { parseDelimited } from './table';
 
 const cfg = defaultData().pieces;
@@ -49,5 +55,30 @@ describe('importer', () => {
     expect(romajiToKana('SHI')).toBe('し');
     expect(romajiToKana('KS')).toBeNull();
     expect(romajiToKana('AI')).toBe('あい');
+    expect(romajiToKana('KYA')).toBe('きゃ');
+    expect(romajiToKana('SHO')).toBe('しょ');
+    expect(romajiToKana('CHU')).toBe('ちゅ');
+  });
+  it('dual labels: first letter consonant, second letter vowel', () => {
+    const consonants = labelsFromList('K S T N H M Y R W G Z D B P J F V C L Q X KY SH CH'.split(' '));
+    const vowels = labelsFromList('A I U E O AA II UU EE OO YA YU YO WA WO AI AU EI OU UI IA IU IE IO'.split(' '));
+    const dual = { ...cfg.edge, labels: consonants, labels2: vowels, dual: true };
+    const m = makeMatcher('edge', dual);
+    // K = U0（1 文字目）、A = U0 の 2 文字目… は同じパーツなので、S（U1）+ A（U0）
+    expect(m.splitPair('SA')).toEqual(['U1', 'U0']);
+    expect(m.splitPair('KI')).toEqual(['U0', 'U1']);
+    // 表形式: 行 = 1 文字目（子音）、列 = 2 文字目（母音）
+    const d = detect("[M', U2]");
+    const header = ['', vowels[d[1]]].join(',');
+    const row = [consonants[d[0]], "\"[M', U2]\""].join(',');
+    const res = importAlgTable('edge', dual, parseDelimited([header + ',' + vowels['U1'], row + ','].join('\n')));
+    expect(res.mode).toBe('matrix');
+    expect(res.transposed).toBeFalsy();
+    expect(res.entries[0]).toMatchObject({ a: d[0], b: d[1] });
+  });
+  it('pair text uses the first set for the first letter and the second set for the second', () => {
+    const dual = { ...cfg.edge, labels: labelsFromList(Array(24).fill('').map((_, i) => 'KSTNHMYRWGZDBPJFVCLQXZZZ'[i])), labels2: labelsFromList(Array(24).fill('').map((_, i) => 'AIUEOAIUEOAIUEOAIUEOAIUE'[i])), dual: true };
+    expect(pairText('edge', dual, 'U1', 'U0')).toBe('SA');
+    expect(pairReading({ ...dual, kana: true }, 'SA')).toBe('さ');
   });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { PIECE_LABEL, PIECE_TYPES, stickerName, targetsFor, type PieceType } from '../cube/pieces';
-import { labelOf, pairText } from '../data/labels';
+import { labelOf, pairText, secondLabelOf } from '../data/labels';
 import { algKey, defaultData, exportData, isAppData, useStore, type AlgEntry, type PairEntry } from '../data/store';
 import { importAlgTable, importPairTable } from '../io/importer';
 import { download, parseDelimited, readExcel, toCsv, writeExcel, type Table } from '../io/table';
@@ -26,7 +26,7 @@ export function ImportPanel() {
 
   const algResult = useMemo(() => (table && content === 'alg' ? importAlgTable(pt, cfg, table) : null), [table, content, pt, cfg]);
   const pairResult = useMemo(
-    () => (table && content === 'pair' ? importPairTable(table, Object.values(cfg.labels).filter(Boolean)) : null),
+    () => (table && content === 'pair' ? importPairTable(table, [...Object.values(cfg.labels), ...(cfg.dual ? Object.values(cfg.labels2 ?? {}) : [])].filter(Boolean)) : null),
     [table, content, cfg],
   );
 
@@ -104,7 +104,7 @@ export function ImportPanel() {
       <PieceTabs value={pt} onChange={setPt} />
       <p className="muted small">
         取り込み先: {PIECE_LABEL[pt]}
-        {content === 'alg' && `（バッファ ${stickerName(pt, cfg.buffer)}・${labelOf(pt, cfg, cfg.buffer)}）`}
+        {content === 'alg' && `（バッファ ${stickerName(pt, cfg.buffer)}）`}
       </p>
       <div className="row wrap">
         <label className="btn">
@@ -218,7 +218,7 @@ function algMatrix(pt: PieceType): Table {
   const s = useStore.getState();
   const cfg = s.pieces[pt];
   const targets = targetsFor(pt, cfg.buffer);
-  const header = ['', ...targets.map((t) => labelOf(pt, cfg, t))];
+  const header = ['', ...targets.map((t) => secondLabelOf(pt, cfg, t))];
   const rows = targets.map((a) => [
     labelOf(pt, cfg, a),
     ...targets.map((b) => {

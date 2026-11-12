@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { PIECE_EVENTS, PIECE_LABEL, PIECE_TYPES, STICKER_IDS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
-import { labelOf, pairReading, pairText } from '../data/labels';
+import { bothLabels, labelOf, pairReading, pairText, secondLabelOf } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { loadSuggestions, useElliottBuffers, useElliottTable } from './suggestions';
 import { avgTime, formatSec } from '../data/srs';
@@ -258,7 +258,7 @@ function BufferPicker({ pt }: { pt: PieceType }) {
       <select value={cfg.buffer} onChange={(e) => setPiece(pt, { buffer: e.target.value })}>
         {STICKER_IDS.map((id) => (
           <option key={id} value={id}>
-            {stickerName(pt, id)}（{labelOf(pt, cfg, id)}）{withSheet.includes(id) ? ' ・Elliott 表あり' : ''}
+            {stickerName(pt, id)}（{bothLabels(pt, cfg, id)}）{withSheet.includes(id) ? ' ・Elliott 表あり' : ''}
           </option>
         ))}
       </select>
@@ -292,13 +292,14 @@ function AlgGrid({
   const reviews = useStore((s) => s.reviews);
   const opts = useTableOptions();
   const map = new Map(rows.map((r) => [`${r.a}|${r.b}`, r]));
-  const heads = targets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }));
+  const rowHeads = targets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }));
+  const colHeads = targets.map((t) => ({ id: t, label: secondLabelOf(pt, cfg, t) }));
   return (
     <div className="stack">
       <TableOptions opts={opts} />
       <PairTable
-        rows={heads}
-        cols={heads}
+        rows={rowHeads}
+        cols={colHeads}
         showText={opts.showText}
         onOpen={(a, b) => onOpen(a, b)}
         cell={(a, b) => {
@@ -311,7 +312,7 @@ function AlgGrid({
             text: r.main,
             tone,
             bad: !!r.verify && r.verify.kind !== 'ok',
-            title: `${labelOf(pt, cfg, a)}${labelOf(pt, cfg, b)}: ${r.main || '未登録'}${t !== null ? `（平均 ${formatSec(t)} 秒）` : ''}`,
+            title: `${pairText(pt, cfg, a, b)}: ${r.main || '未登録'}${t !== null ? `（平均 ${formatSec(t)} 秒）` : ''}`,
           };
         }}
       />

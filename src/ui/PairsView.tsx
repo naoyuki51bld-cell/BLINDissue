@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { PIECE_LABEL, type PieceType } from '../cube/pieces';
-import { labelOf, pairReading, pairText } from '../data/labels';
+import { labelOf, pairReading, pairText, secondLabelOf } from '../data/labels';
 import { pairReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '../data/store';
 import { avgTime, formatSec } from '../data/srs';
 import { Modal, PieceTabs, StatusBadge, useCases, usePersisted, useTargets } from './shared';
@@ -95,7 +95,7 @@ export function PairsView() {
           <TableOptions opts={opts} />
           <PairTable
             rows={firstTargets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }))}
-            cols={firstTargets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }))}
+            cols={firstTargets.map((t) => ({ id: t, label: secondLabelOf(pt, cfg, t) }))}
             showText={opts.showText}
             onOpen={(a, b) => setEditing(pairText(pt, cfg, a, b))}
             cell={(a, b) => {

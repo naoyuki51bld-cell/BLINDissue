@@ -73,6 +73,16 @@ const ROMAJI: Record<string, string> = {
   n: 'ん', nn: 'ん',
 };
 
+// 拗音（きゃ・しゃ・ちゃ など）
+const SMALL: Record<string, string> = { a: 'ゃ', u: 'ゅ', o: 'ょ', e: 'ぇ' };
+const YOON_BASE: Record<string, string> = {
+  ky: 'き', gy: 'ぎ', sy: 'し', sh: 'し', zy: 'じ', jy: 'じ', ty: 'ち', ch: 'ち', cy: 'ち', dy: 'ぢ',
+  ny: 'に', hy: 'ひ', by: 'び', py: 'ぴ', my: 'み', ry: 'り', ly: 'り',
+};
+for (const [c, base] of Object.entries(YOON_BASE))
+  for (const [v, small] of Object.entries(SMALL)) if (!ROMAJI[c + v]) ROMAJI[c + v] = base + small;
+for (const [v, small] of Object.entries(SMALL)) if (!ROMAJI['j' + v]) ROMAJI['j' + v] = 'じ' + small;
+
 /** ローマ字として読めればひらがなにする。読めなければ null */
 export function romajiToKana(text: string): string | null {
   const s = text.toLowerCase();

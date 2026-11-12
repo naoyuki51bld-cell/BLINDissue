@@ -1200,3 +1200,15 @@ details summary {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
+.dual-toggle {
+  align-items: flex-start;
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.dual-toggle input {
+  margin-top: 4px;
+}
+.label-cell input + input {
+  margin-top: 4px;
+}

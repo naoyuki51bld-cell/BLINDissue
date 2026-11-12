@@ -3,7 +3,7 @@ import { colors } from '../cube/cube';
 import { cancel, flatten, flatToString, invertAlgText, moveCount, parseAlg } from '../cube/notation';
 import { stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { stateAfter } from '../cube/verify';
-import { labelOf, pairReading, pairText } from '../data/labels';
+import { labelOf, pairReading, pairText, secondLabelOf } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { avgExecTime, avgTime, formatSec } from '../data/srs';
 import { CubeNet } from './CubeNet';
@@ -154,7 +154,7 @@ export function AlgEditor({ pt, a, b, onClose }: Props) {
       onClose={save}
     >
       <p className="muted small">
-        {stickerName(pt, cfg.buffer)}（バッファ）→ {stickerName(pt, a)}（{labelOf(pt, cfg, a)}）→ {stickerName(pt, b)}（{labelOf(pt, cfg, b)}） ・ {cfg.size}x{cfg.size} で確認
+        {stickerName(pt, cfg.buffer)}（バッファ）→ {stickerName(pt, a)}（{labelOf(pt, cfg, a)}）→ {stickerName(pt, b)}（{secondLabelOf(pt, cfg, b)}） ・ {cfg.size}x{cfg.size} で確認
       </p>
       <div className="editor-grid">
         <div>

@@ -15,7 +15,12 @@ export const STATUS_LABEL: Record<Status, string> = {
 export const STATUSES: Status[] = ['none', 'learning', 'learned', 'auto'];
 
 export interface PieceConfig {
+  /** 1 文字目として使うときの文字（2 セット使わない場合はこれだけ） */
   labels: Labels;
+  /** 2 文字目として使うときの文字（dual のときのみ使う） */
+  labels2?: Labels;
+  /** 1 文字目と 2 文字目で別の文字を使う（例: 1 文字目は子音、2 文字目は母音） */
+  dual?: boolean;
   buffer: StickerId;
   size: number;
   /** ペアをローマ字→かな読みで併記する */

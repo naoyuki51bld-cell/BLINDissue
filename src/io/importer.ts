@@ -5,13 +5,18 @@ import { verifyAlg } from '../cube/verify';
 import type { Table } from './table';
 
 export interface Matcher {
+  /** 1 文字目の文字・2 文字目の文字・位置名のどれかで照合 */
   match: (token: string) => StickerId | null;
+  /** 1 文字目として照合 */
+  matchFirst: (token: string) => StickerId | null;
+  /** 2 文字目として照合 */
+  matchSecond: (token: string) => StickerId | null;
   splitPair: (text: string) => [StickerId, StickerId] | null;
 }
 
 const clean = (s: string) => s.normalize('NFKC').trim();
 
-export function makeMatcher(pt: PieceType, cfg: PieceConfig): Matcher {
+function lookup(pt: PieceType, labels: Record<StickerId, string>) {
   const exact = new Map<string, StickerId[]>();
   const loose = new Map<string, StickerId[]>();
   const add = (m: Map<string, StickerId[]>, k: string, id: StickerId) => {
@@ -21,17 +26,17 @@ export function makeMatcher(pt: PieceType, cfg: PieceConfig): Matcher {
     m.set(k, list);
   };
   for (const id of STICKER_IDS) {
-    const label = clean(cfg.labels[id] ?? '');
+    const label = clean(labels[id] ?? '');
     add(exact, label, id);
     add(loose, label.toLowerCase(), id);
   }
-  // 位置名（UFR など）はラベルと衝突しないときだけ使う
+  // 位置名（UFR など）は文字と衝突しないときだけ使う
   for (const id of STICKER_IDS) {
     const name = stickerName(pt, id);
     if (!exact.has(name)) add(exact, name, id);
     if (!loose.has(name.toLowerCase())) add(loose, name.toLowerCase(), id);
   }
-  const match = (token: string): StickerId | null => {
+  return (token: string): StickerId | null => {
     const t = clean(token);
     const e = exact.get(t);
     if (e && e.length === 1) return e[0];
@@ -39,25 +44,31 @@ export function makeMatcher(pt: PieceType, cfg: PieceConfig): Matcher {
     const l = loose.get(t.toLowerCase());
     return l && l.length === 1 ? l[0] : null;
   };
+}
+
+export function makeMatcher(pt: PieceType, cfg: PieceConfig): Matcher {
+  const matchFirst = lookup(pt, cfg.labels);
+  const matchSecond = cfg.dual ? lookup(pt, { ...cfg.labels, ...Object.fromEntries(Object.entries(cfg.labels2 ?? {}).filter(([, v]) => v)) }) : matchFirst;
+  const match = (token: string) => matchFirst(token) ?? matchSecond(token);
   const splitPair = (text: string): [StickerId, StickerId] | null => {
     const t = clean(text);
     const parts = t.split(/\s*(?:[\s\-→>＞・/,、|]|->)\s*/).filter(Boolean);
     if (parts.length === 2) {
-      const a = match(parts[0]);
-      const b = match(parts[1]);
+      const a = matchFirst(parts[0]);
+      const b = matchSecond(parts[1]);
       return a && b ? [a, b] : null;
     }
     const s = t.replace(/\s+/g, '');
     const found: [StickerId, StickerId][] = [];
     const chars = Array.from(s);
     for (let i = 1; i < chars.length; i++) {
-      const a = match(chars.slice(0, i).join(''));
-      const b = match(chars.slice(i).join(''));
+      const a = matchFirst(chars.slice(0, i).join(''));
+      const b = matchSecond(chars.slice(i).join(''));
       if (a && b) found.push([a, b]);
     }
     return found.length === 1 ? found[0] : null;
   };
-  return { match, splitPair };
+  return { match, matchFirst, matchSecond, splitPair };
 }
 
 export interface ImportedAlg {
@@ -122,45 +133,48 @@ export function importAlgTable(pt: PieceType, cfg: PieceConfig, table: Table): A
         labelCol = c;
       }
     }
-    const cols = header.map((h, c) => (c === labelCol ? null : h ? m.match(h) : null));
-    header.forEach((h, c) => {
-      if (c !== labelCol && h && !cols[c]) unmatched.add(h);
-    });
-    for (let r = headerRow + 1; r < table.length; r++) {
-      const row = table[r];
-      const rowLabel = row[labelCol];
-      if (!rowLabel) continue;
-      const a = m.match(rowLabel);
-      if (!a) {
-        if (row.some((c, i) => i !== labelCol && c)) unmatched.add(rowLabel);
-        continue;
-      }
-      cols.forEach((b, c) => {
-        const cell = row[c];
-        if (!b || !cell) return;
-        if (!valid(a, b)) {
-          if (a !== b) skippedInvalid.push(`${rowLabel}${header[c]}`);
-          return;
-        }
-        const algs = splitAlgCell(cell);
-        if (algs.length) entries.push({ a, b, algs });
+    // 行と列のどちらが 1 文字目かは表によって違う。両方の読み方で作り、手順を実際に検証して多く合う方を採用する
+    const build = (rowFirst: boolean) => {
+      const rowMatch = rowFirst ? m.matchFirst : m.matchSecond;
+      const colMatch = rowFirst ? m.matchSecond : m.matchFirst;
+      const out: ImportedAlg[] = [];
+      const miss = new Set<string>();
+      const invalid: string[] = [];
+      const cols = header.map((h, c) => (c === labelCol ? null : h ? colMatch(h) : null));
+      header.forEach((h, c) => {
+        if (c !== labelCol && h && !cols[c]) miss.add(h);
       });
-    }
-    // 行と列のどちらが 1 文字目かは表によって違うので、手順を実際に検証して多く合う向きを採用する
-    const sample = entries.slice(0, 80);
+      for (let r = headerRow + 1; r < table.length; r++) {
+        const row = table[r];
+        const rowLabel = row[labelCol];
+        if (!rowLabel) continue;
+        const x = rowMatch(rowLabel);
+        if (!x) {
+          if (row.some((c, i) => i !== labelCol && c)) miss.add(rowLabel);
+          continue;
+        }
+        cols.forEach((y, c) => {
+          const cell = row[c];
+          if (!y || !cell) return;
+          const [a, b] = rowFirst ? [x, y] : [y, x];
+          if (!valid(a, b)) {
+            if (a !== b) invalid.push(`${rowLabel}${header[c]}`);
+            return;
+          }
+          const algs = splitAlgCell(cell);
+          if (algs.length) out.push({ a, b, algs });
+        });
+      }
+      return { entries: out, unmatched: [...miss], skippedInvalid: invalid };
+    };
     const okCount = (list: ImportedAlg[]) =>
-      list.filter((e) => verifyAlg(pt, cfg.size, e.algs[0], buffer, e.a, e.b).kind === 'ok').length;
-    const swapped = sample.map((e) => ({ ...e, a: e.b, b: e.a }));
-    if (okCount(swapped) > okCount(sample)) {
-      return {
-        mode: 'matrix',
-        transposed: true,
-        entries: entries.map((e) => ({ ...e, a: e.b, b: e.a })),
-        unmatched: [...unmatched],
-        skippedInvalid,
-      };
-    }
-    return { mode: 'matrix', entries, unmatched: [...unmatched], skippedInvalid };
+      list.slice(0, 80).filter((e) => verifyAlg(pt, cfg.size, e.algs[0], buffer, e.a, e.b).kind === 'ok').length;
+    const normal = build(true);
+    const transposed = build(false);
+    const sn = okCount(normal.entries);
+    const st = okCount(transposed.entries);
+    if (st > sn || (st === sn && transposed.entries.length > normal.entries.length)) return { mode: 'matrix', transposed: true, ...transposed };
+    return { mode: 'matrix', ...normal };
   }
 
   // リスト形式: 「ペア | 手順 | メモ」または「1 文字目 | 2 文字目 | 手順 | メモ」
@@ -169,8 +183,8 @@ export function importAlgTable(pt: PieceType, cfg: PieceConfig, table: Table): A
     if (cells.length < 2) continue;
     let pair: [StickerId, StickerId] | null = null;
     let rest: string[] = [];
-    const a1 = m.match(row[0] ?? '');
-    const b1 = m.match(row[1] ?? '');
+    const a1 = m.matchFirst(row[0] ?? '');
+    const b1 = m.matchSecond(row[1] ?? '');
     if (a1 && b1 && row[2] && looksLikeAlg(row[2])) {
       pair = [a1, b1];
       rest = row.slice(2);
