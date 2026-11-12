@@ -1058,3 +1058,145 @@ details summary {
   color: var(--accent-text);
   vertical-align: 1px;
 }
+
+/* pair table (手順・レターペアの表) */
+.pair-table {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 0.75rem;
+}
+.pair-table th {
+  position: sticky;
+  background: var(--surface);
+  padding: 2px 4px;
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 1;
+}
+.pair-table thead th {
+  top: 0;
+}
+.pair-table tbody th {
+  left: 0;
+}
+.pair-table td {
+  padding: 0;
+}
+.pair-table td button {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  color: #1b1f24;
+  background: var(--tone-bg, var(--surface-2));
+  overflow: hidden;
+}
+.pair-table.with-text td button {
+  width: 120px;
+  height: auto;
+  min-height: 34px;
+  padding: 3px 5px;
+  text-align: left;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pair-table td.empty button {
+  --tone-bg: var(--surface-2);
+}
+.pair-table td.na {
+  background: repeating-linear-gradient(45deg, transparent 0 3px, var(--border) 3px 4px);
+  border-radius: 4px;
+}
+.pair-table td.bad button {
+  outline: 2px solid var(--danger);
+}
+.tone-none {
+  --tone-bg: var(--st-none);
+}
+.tone-learning {
+  --tone-bg: var(--st-learning);
+}
+.tone-learned {
+  --tone-bg: var(--st-learned);
+}
+.tone-auto {
+  --tone-bg: var(--st-auto);
+}
+.tone-fast {
+  --tone-bg: #8fd9a8;
+}
+.tone-mid {
+  --tone-bg: #ffd77a;
+}
+.tone-slow {
+  --tone-bg: #ff9a8f;
+}
+.tone-untested {
+  --tone-bg: #dfe3e8;
+}
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  vertical-align: -2px;
+  background: var(--tone-bg);
+}
+.legend-item {
+  margin-right: 12px;
+  white-space: nowrap;
+  display: inline-block;
+}
+.chip.special:not(.active) {
+  border-style: dashed;
+}
+.next-card {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: right;
+  margin: -6px 2px 0;
+}
+.next-card b {
+  color: var(--text);
+  font-size: 1rem;
+}
+.segmented.wrap {
+  flex-wrap: wrap;
+}
+.net-wrap {
+  position: relative;
+  width: 100%;
+}
+.net-edit {
+  position: absolute;
+  min-width: 52px;
+  min-height: 36px !important;
+  padding: 2px 4px !important;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
+  border: 2px solid var(--accent) !important;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 25%);
+  z-index: 3;
+}
+.net-number {
+  fill: #555;
+  font-weight: 400;
+  stroke: none;
+}
+.net-pair {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 760px) {
+  .net-pair {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

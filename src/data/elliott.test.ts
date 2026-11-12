@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { stickerName } from '../cube/pieces';
 import { verifyAlg } from '../cube/verify';
 import data from './elliott.json';
-import { elliottBuffers, elliottTable, idFromName, type ElliottData } from './elliott';
+import { elliottBuffers, elliottFlips, elliottParity, elliottTable, idFromName, type ElliottData } from './elliott';
+import { checkSpecial, flipCases, orderEdges, parityCases, pieceRefId, describeAlg } from '../cube/special';
 
 const d = data as unknown as ElliottData;
 
@@ -33,4 +34,37 @@ describe("Elliott's sheet", () => {
       expect(bad).toEqual([]);
     });
   }
+  it('parity algs all swap the buffer with the last target and two edges', () => {
+    const t = elliottParity(d);
+    const bad: string[] = [];
+    let n = 0;
+    for (const [k, alg] of Object.entries(t)) {
+      const [buffer, target] = k.split('|');
+      n++;
+      const r = checkSpecial({ kind: 'parity', buffer, target }, alg);
+      if (!r.ok) bad.push(`${stickerName('corner', buffer)} ${stickerName('corner', target)}: ${alg} → ${r.message}`);
+    }
+    console.log(`PARITY ${n - bad.length}/${n}`);
+    bad.slice(0, 20).forEach((x) => console.log('BADP', x));
+    expect(n).toBe(66);
+    expect(bad).toEqual([]);
+    expect(parityCases('U2')).toHaveLength(21);
+  });
+  it('flip algs flip exactly the two edges', () => {
+    const t = elliottFlips(d, (id) => pieceRefId('edge', id), orderEdges);
+    const bad: string[] = [];
+    for (const [k, alg] of Object.entries(t)) {
+      const [a, b] = k.split('|');
+      const r = checkSpecial({ kind: 'flip', a, b }, alg);
+      if (!r.ok) bad.push(`${stickerName('edge', a)}+${stickerName('edge', b)}: ${alg} → ${r.message}`);
+    }
+    console.log(`FLIP ${Object.keys(t).length - bad.length}/${Object.keys(t).length}`);
+    bad.slice(0, 20).forEach((x) => console.log('BADF', x));
+    expect(Object.keys(t)).toHaveLength(66);
+    expect(flipCases()).toHaveLength(66);
+    expect(bad).toEqual([]);
+  });
+  it('describes what an alg solves', () => {
+    expect(describeAlg("R U R' U' R' F R2 U' R' U' R U R' F'")).toContain('交換');
+  });
 });

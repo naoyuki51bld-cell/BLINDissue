@@ -156,11 +156,9 @@ export class AttemptTracker {
   private state: CubeState = solved(3);
   readonly expected: FaceTurn[] | null;
 
+  /** check: 揃った状態から回した結果を受け取り、正解なら true */
   constructor(
-    private pt: PieceType,
-    private buffer: StickerId,
-    private a: StickerId,
-    private b: StickerId,
+    private check: (state: CubeState) => boolean,
     algText: string,
   ) {
     let exp: FaceTurn[] | null = null;
@@ -170,6 +168,11 @@ export class AttemptTracker {
       exp = null;
     }
     this.expected = exp;
+  }
+
+  /** 3-style のケース（バッファ → A → B）用 */
+  static forCase(pt: PieceType, buffer: StickerId, a: StickerId, b: StickerId, algText: string) {
+    return new AttemptTracker((s) => verifyState(pt, 3, s, buffer, a, b).kind === 'ok', algText);
   }
 
   /** 持ち方に合わせて変換済みの 1 手を加える。正解になったら true */
@@ -186,7 +189,7 @@ export class AttemptTracker {
   }
 
   isSolved(): boolean {
-    return verifyState(this.pt, 3, this.state, this.buffer, this.a, this.b).kind === 'ok';
+    return this.check(this.state);
   }
 
   get moves(): FaceTurn[] {

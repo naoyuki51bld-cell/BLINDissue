@@ -281,7 +281,7 @@ export function AlgEditor({ pt, a, b, onClose }: Props) {
             <span className="field-label">メモ（指使い・覚え方など）</span>
             <textarea value={memo} rows={2} onChange={(e) => setMemo(e.target.value)} />
           </label>
-          {reviewState && (
+          {reviewState && reviewState.reps + reviewState.lapses > 0 && (
             <p className="muted small">
               練習 {reviewState.reps + reviewState.lapses} 回 ・ 平均想起 {formatSec(avgTime(reviewState))} 秒
               {avgExecTime(reviewState) !== null && ` ・ 平均実行 ${formatSec(avgExecTime(reviewState))} 秒`} ・ ミス {reviewState.lapses} 回{' '}

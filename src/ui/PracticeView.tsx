@@ -2,18 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PIECE_LABEL, stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, pairReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '../data/store';
-import { avgTime, formatSec, isDue, type Grade, type ReviewState } from '../data/srs';
+import { avgTime, formatSec, isDue, isNew, type Grade, type ReviewState } from '../data/srs';
 import { PieceTabs, useCases, usePersisted, useTargets } from './shared';
 import { SmartCubePanel, SmartSession, smartDebug } from './SmartPractice';
 import { useSmartCube } from '../smartcube/connection';
+import { SPECIAL_LABEL, specialKey, type SpecialCase, type SpecialKind } from '../cube/special';
+import { specialCasesFor, specialTitle } from './SpecialView';
 
-type Content = 'alg' | 'pair';
+type Content = 'alg' | 'pair' | SpecialKind;
+const SPECIAL_CONTENT: SpecialKind[] = ['parity', 'flip', 'ltct'];
 type Scope = 'due' | 'all' | 'weak' | 'new';
 
 export interface Card {
   reviewKey: string;
   /** 手順カードのとき: スマートキューブで判定するためのケース */
   target?: { pt: PieceType; buffer: StickerId; a: StickerId; b: StickerId };
+  /** パリティ・フリップ・LTCT のとき */
+  special?: SpecialCase;
   prompt: string;
   reading: string | null;
   sub: string;
@@ -61,11 +66,14 @@ export function PracticeView() {
   const [slowSec, setSlowSec] = usePersisted<number>('practice.slow', 2);
   const [session, setSession] = useState<Card[] | null>(null);
   const [smart, setSmart] = usePersisted<boolean>('practice.smart', false);
-  const smartAvailable = content === 'alg' && (pt === 'corner' || pt === 'edge');
+  const isSpecial = SPECIAL_CONTENT.includes(content as SpecialKind);
+  const smartAvailable = isSpecial || (content === 'alg' && (pt === 'corner' || pt === 'edge'));
   const useSmart = smart && smartAvailable;
 
   const smartStatus = useSmartCube((s) => s.status);
   const cfg = useStore((s) => s.pieces[pt]);
+  const cornerCfg = useStore((s) => s.pieces.corner);
+  const edgeCfg = useStore((s) => s.pieces.edge);
   const algs = useStore((s) => s.algs);
   const pairs = useStore((s) => s.pairs);
   const reviews = useStore((s) => s.reviews);
@@ -74,6 +82,17 @@ export function PracticeView() {
 
   const pool = useMemo(() => {
     const cards: (Card & { review?: ReviewState; status: Status })[] = [];
+    if (isSpecial) {
+      for (const c of specialCasesFor(content as SpecialKind, cornerCfg.buffer)) {
+        const key = specialKey(c);
+        const e = algs[key];
+        if (!e || !e.algs.length) continue;
+        const rk = algReviewKey(key);
+        const { title, sub } = specialTitle(c, cornerCfg, edgeCfg);
+        cards.push({ reviewKey: rk, special: c, prompt: title, reading: null, sub, answer: [e.algs[e.main], ...e.algs.filter((_, i) => i !== e.main)], memo: e.memo, review: reviews[rk], status: e.status });
+      }
+      return cards;
+    }
     const seenPairs = new Set<string>();
     for (const [a, b] of cases) {
       if (firsts.length && !firsts.includes(a)) continue;
@@ -96,15 +115,15 @@ export function PracticeView() {
       }
     }
     return cards;
-  }, [cases, firsts, pt, cfg, content, algs, pairs, reviews]);
+  }, [cases, firsts, pt, cfg, content, algs, pairs, reviews, isSpecial, cornerCfg, edgeCfg]);
 
   const filtered = useMemo(() => {
     const now = Date.now();
     return pool.filter((c) => {
       if (statuses.length && !statuses.includes(c.status)) return false;
-      if (scope === 'due') return !c.review || isDue(c.review, now);
+      if (scope === 'due') return isNew(c.review) || isDue(c.review, now);
       if (scope === 'weak') return isWeak(c.review, slowSec * 1000);
-      if (scope === 'new') return !c.review;
+      if (scope === 'new') return isNew(c.review);
       return true;
     });
   }, [pool, statuses, scope, slowSec]);
@@ -118,7 +137,7 @@ export function PracticeView() {
       <SmartSession
         cards={session}
         slowMs={slowSec * 1000}
-        title={`${PIECE_LABEL[pt]}・スマートキューブ`}
+        title={`${isSpecial ? SPECIAL_LABEL[content as SpecialKind] : PIECE_LABEL[pt]}・スマートキューブ`}
         onExit={() => setSession(null)}
         onRetry={(cards) => setSession(shuffle(cards))}
       />
@@ -129,7 +148,7 @@ export function PracticeView() {
       <Session
         cards={session}
         slowMs={slowSec * 1000}
-        title={`${PIECE_LABEL[pt]}・${content === 'alg' ? '手順' : 'レターペア'}`}
+        title={isSpecial ? SPECIAL_LABEL[content as SpecialKind] : `${PIECE_LABEL[pt]}・${content === 'alg' ? '手順' : 'レターペア'}`}
         onExit={() => setSession(null)}
         onRetry={(cards) => setSession(shuffle(cards))}
       />
@@ -140,15 +159,14 @@ export function PracticeView() {
 
   return (
     <div className="page">
-      <div className="segmented big">
-        <button className={content === 'alg' ? 'active' : ''} onClick={() => setContent('alg')}>
-          手順
-        </button>
-        <button className={content === 'pair' ? 'active' : ''} onClick={() => setContent('pair')}>
-          レターペア
-        </button>
+      <div className="segmented big wrap">
+        {(['alg', 'pair', ...SPECIAL_CONTENT] as Content[]).map((c) => (
+          <button key={c} className={content === c ? 'active' : ''} onClick={() => setContent(c)}>
+            {c === 'alg' ? '手順' : c === 'pair' ? 'レターペア' : SPECIAL_LABEL[c as SpecialKind]}
+          </button>
+        ))}
       </div>
-      <PieceTabs value={pt} onChange={(p) => { setPt(p); setFirsts([]); }} />
+      {!isSpecial && <PieceTabs value={pt} onChange={(p) => { setPt(p); setFirsts([]); }} />}
 
       <section className="card stack">
         <div>
@@ -184,7 +202,7 @@ export function PracticeView() {
             ))}
           </div>
         </div>
-        <div>
+        {!isSpecial && <div>
           <div className="field-label">1 文字目（未選択なら全部）</div>
           <div className="chips">
             {targets.map((t) => (
@@ -193,7 +211,7 @@ export function PracticeView() {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
         <div className="row wrap">
           <label className="field inline">
             <span className="field-label">出題数</span>
@@ -216,13 +234,13 @@ export function PracticeView() {
             </select>
           </label>
         </div>
-        {content === 'alg' && (
+        {content !== 'pair' && (
           <div className="stack">
             <label className="check">
               <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} disabled={!smartAvailable} />
               スマートキューブで回して答える（自動で正誤判定・実行時間を計測）
             </label>
-            {!smartAvailable && smart && <p className="muted small">スマートキューブは 3x3 なので、コーナーとエッジのみ使えます。</p>}
+            {!smartAvailable && smart && <p className="muted small">スマートキューブは 3x3 なので、コーナー・エッジ・パリティ・フリップ・LTCT で使えます。</p>}
             {useSmart && <SmartCubePanel />}
           </div>
         )}
@@ -231,7 +249,7 @@ export function PracticeView() {
         </button>
         {pool.length === 0 && (
           <p className="muted small">
-            {content === 'alg' ? '「手順」タブで手順を登録するか、「設定」からスプレッドシートを取り込んでください。' : '「ペア」タブでイメージを登録してください。'}
+            {content === 'pair' ? '「ペア」タブでイメージを登録してください。' : '「手順」タブで手順を登録するか、「設定」からスプレッドシートを取り込んでください。'}
           </p>
         )}
       </section>
@@ -326,6 +344,7 @@ function Session({
       <div className="progress thin">
         <span className="seg seg-learned" style={{ width: `${(index / cards.length) * 100}%` }} />
       </div>
+      <NextCard card={cards[index + 1]} />
       <button className="flashcard" onClick={revealed ? undefined : reveal} aria-live="polite">
         <span className="prompt">{card.prompt}</span>
         {card.reading && <span className="reading">{card.reading}</span>}
@@ -424,5 +443,15 @@ export function Summary({ results, slowMs, onExit, onRetry }: { results: Result[
         ))}
       </ul>
     </div>
+  );
+}
+
+/** 次に出てくる問題を小さく表示 */
+export function NextCard({ card }: { card?: Card }) {
+  return (
+    <p className="next-card" aria-label="次の問題">
+      次: {card ? <b>{card.prompt}</b> : <span className="muted">（これが最後）</span>}
+      {card?.reading && <span className="muted"> {card.reading}</span>}
+    </p>
   );
 }

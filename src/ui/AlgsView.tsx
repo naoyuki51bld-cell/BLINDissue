@@ -1,16 +1,44 @@
 import { useMemo, useState } from 'react';
-import { PIECE_EVENTS, STICKER_IDS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
+import { PIECE_EVENTS, PIECE_LABEL, PIECE_TYPES, STICKER_IDS, stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { loadSuggestions, useElliottBuffers, useElliottTable } from './suggestions';
 import { avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
-import { cachedVerify, PieceTabs, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
+import { cachedVerify, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
+import { SpecialView } from './SpecialView';
+import { SPECIAL_LABEL, type SpecialKind } from '../cube/special';
+import { PairTable, TableLegend, TableOptions, timeTone, useTableOptions } from './PairTable';
 
 type Filter = 'all' | 'missing' | 'ng' | Status;
 
+type AlgTab = PieceType | SpecialKind;
+const SPECIAL_KINDS: SpecialKind[] = ['parity', 'flip', 'ltct'];
+
 export function AlgsView() {
-  const [pt, setPt] = usePersisted<PieceType>('algs.pt', 'corner');
+  const [tab, setTab] = usePersisted<AlgTab>('algs.tab', 'corner');
+  const isSpecial = SPECIAL_KINDS.includes(tab as SpecialKind);
+  return (
+    <div className="page">
+      <div className="chips" role="tablist" aria-label="種類">
+        {[...PIECE_TYPES, ...SPECIAL_KINDS].map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            className={`${tab === t ? 'chip active' : 'chip'}${SPECIAL_KINDS.includes(t as SpecialKind) ? ' special' : ''}`}
+            onClick={() => setTab(t)}
+          >
+            {PIECE_LABEL[t as PieceType] ?? SPECIAL_LABEL[t as SpecialKind]}
+          </button>
+        ))}
+      </div>
+      {isSpecial ? <SpecialView kind={tab as SpecialKind} /> : <PieceAlgs key={tab} pt={tab as PieceType} />}
+    </div>
+  );
+}
+
+function PieceAlgs({ pt }: { pt: PieceType }) {
   const [view, setView] = usePersisted<'list' | 'grid'>('algs.view', 'list');
   const [first, setFirst] = useState<StickerId | 'all'>('all');
   const [filter, setFilter] = useState<Filter>('all');
@@ -54,8 +82,7 @@ export function AlgsView() {
   });
 
   return (
-    <div className="page">
-      <PieceTabs value={pt} onChange={(p) => { setPt(p); setFirst('all'); }} />
+    <>
       <div className="summary">
         <div>
           <strong>{stats.registered}</strong> / {rows.length} ケース登録
@@ -139,7 +166,7 @@ export function AlgsView() {
       )}
 
       {editing && <AlgEditor pt={pt} a={editing[0]} b={editing[1]} onClose={() => setEditing(null)} />}
-    </div>
+    </>
   );
 }
 
@@ -258,44 +285,37 @@ function AlgGrid({
 }: {
   pt: PieceType;
   targets: StickerId[];
-  rows: { a: StickerId; b: StickerId; main: string; entry?: { status: Status }; verify: ReturnType<typeof cachedVerify> | null }[];
+  rows: { a: StickerId; b: StickerId; key: string; main: string; entry?: { status: Status }; verify: ReturnType<typeof cachedVerify> | null }[];
   onOpen: (a: StickerId, b: StickerId) => void;
 }) {
   const cfg = useStore((s) => s.pieces[pt]);
+  const reviews = useStore((s) => s.reviews);
+  const opts = useTableOptions();
   const map = new Map(rows.map((r) => [`${r.a}|${r.b}`, r]));
+  const heads = targets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }));
   return (
-    <div className="grid-wrap">
-      <table className="alg-grid">
-        <thead>
-          <tr>
-            <th className="corner-cell">1＼2</th>
-            {targets.map((t) => (
-              <th key={t}>{labelOf(pt, cfg, t)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {targets.map((a) => (
-            <tr key={a}>
-              <th>{labelOf(pt, cfg, a)}</th>
-              {targets.map((b) => {
-                const r = map.get(`${a}|${b}`);
-                if (!r) return <td key={b} className="na" />;
-                const st = r.entry?.status ?? 'none';
-                const bad = r.verify && r.verify.kind !== 'ok';
-                return (
-                  <td key={b} className={`gc st-${st}${r.main ? '' : ' empty'}${bad ? ' bad' : ''}`}>
-                    <button onClick={() => onOpen(a, b)} title={`${labelOf(pt, cfg, a)}${labelOf(pt, cfg, b)}: ${r.main || '未登録'}`}>
-                      {bad ? '✗' : r.main ? '●' : ''}
-                    </button>
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="muted small">● 登録済み（色はステータス）・ ✗ 要確認 ・ セルを押すと編集</p>
+    <div className="stack">
+      <TableOptions opts={opts} />
+      <PairTable
+        rows={heads}
+        cols={heads}
+        showText={opts.showText}
+        onOpen={(a, b) => onOpen(a, b)}
+        cell={(a, b) => {
+          const r = map.get(`${a}|${b}`);
+          if (!r) return null;
+          const rv = reviews[algReviewKey(r.key)];
+          const tone = opts.color === 'time' ? (r.main ? timeTone(rv, opts.slowSec) : 'none') : r.entry?.status ?? 'none';
+          const t = avgTime(rv);
+          return {
+            text: r.main,
+            tone,
+            bad: !!r.verify && r.verify.kind !== 'ok',
+            title: `${labelOf(pt, cfg, a)}${labelOf(pt, cfg, b)}: ${r.main || '未登録'}${t !== null ? `（平均 ${formatSec(t)} 秒）` : ''}`,
+          };
+        }}
+      />
+      <TableLegend mode={opts.color} slowSec={opts.slowSec} />
     </div>
   );
 }

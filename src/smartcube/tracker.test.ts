@@ -19,7 +19,7 @@ describe('smart cube tracker', () => {
     for (const [pt, alg] of ALGS) {
       const d = detectCase(pt, 3, applyMoves(solved(3), 3, toBaseMoves(alg, 3)), 'U2');
       expect(d, alg).not.toBeNull();
-      const t = new AttemptTracker(pt, 'U2', d![0], d![1], alg);
+      const t = AttemptTracker.forCase(pt, 'U2', d![0], d![1], alg);
       const turns = toFaceTurns(alg);
       expect(turns.every((x) => 'URFDLB'.includes(x.face)), alg).toBe(true);
       let solvedAt = -1;
@@ -41,7 +41,7 @@ describe('smart cube tracker', () => {
   });
 
   it('wrong alg is not accepted and divergence is located', () => {
-    const t = new AttemptTracker('corner', 'U2', 'U0', 'U1', "[R U R', D]");
+    const t = AttemptTracker.forCase('corner', 'U2', 'U0', 'U1', "[R U R', D]");
     for (const m of ['R', 'U', "R'", "D'"]) t.push(parseFaceTurn(m)!);
     expect(t.divergence()).toBe(3);
     expect(t.isSolved()).toBe(false);
@@ -59,7 +59,7 @@ describe('smart cube tracker', () => {
   it('inverse alg solves the reverse case', () => {
     const alg = "[U R U', M']";
     const d = detectCase('edge', 3, applyMoves(solved(3), 3, toBaseMoves(alg, 3)), 'U2')!;
-    const t = new AttemptTracker('edge', 'U2', d[1], d[0], invertAlgText(alg));
+    const t = AttemptTracker.forCase('edge', 'U2', d[1], d[0], invertAlgText(alg));
     const turns = toFaceTurns(invertAlgText(alg));
     expect(turns.map((x) => t.push(x)).pop()).toBe(true);
   });

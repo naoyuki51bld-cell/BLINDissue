@@ -56,6 +56,11 @@ export function avgExecTime(r: ReviewState | undefined): number | null {
   return recent.reduce((a, b) => a + b, 0) / recent.length;
 }
 
+/** 一度も練習していない（記録をリセットした場合も含む） */
+export function isNew(r: ReviewState | undefined): boolean {
+  return !r || r.reps + r.lapses === 0;
+}
+
 export function isDue(r: ReviewState | undefined, now = Date.now()): boolean {
   return !!r && r.reps + r.lapses > 0 && r.due <= now;
 }

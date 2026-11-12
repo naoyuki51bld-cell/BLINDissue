@@ -28,9 +28,30 @@ interface Props {
   onSlotClick?: (id: StickerId) => void;
   maxWidth?: number;
   title?: string;
+  /** 表示するスロット（それ以外は薄く・文字なし） */
+  visibleSlots?: Set<StickerId>;
+  /** 文字が空のスロットに番号を薄く表示 */
+  showNumbers?: boolean;
+  /** その場で文字を編集しているスロット */
+  editingId?: StickerId | null;
+  onEditDone?: (id: StickerId, value: string, go: 'next' | 'prev' | 'stay') => void;
 }
 
-export function CubeNet({ n, pieceType, labels, colorOf, marks = [], dimOthers, onSlotClick, maxWidth = 360, title }: Props) {
+export function CubeNet({
+  n,
+  pieceType,
+  labels,
+  colorOf,
+  marks = [],
+  dimOthers,
+  onSlotClick,
+  maxWidth = 360,
+  title,
+  visibleSlots,
+  showNumbers,
+  editingId,
+  onEditDone,
+}: Props) {
   const cell = 10;
   const gap = 3;
   const faceSize = n * cell;
@@ -46,6 +67,7 @@ export function CubeNet({ n, pieceType, labels, colorOf, marks = [], dimOthers, 
   const markOf = new Map(marks.map((m) => [m.id, m.kind]));
   const rects = [];
   const texts = [];
+  const slotPos = new Map<StickerId, { x: number; y: number }>();
   for (let f = 0; f < 6; f++) {
     const [fx, fy] = FACE_POS[FACES[f]];
     const ox = 1 + fx * (faceSize + gap);
@@ -54,11 +76,14 @@ export function CubeNet({ n, pieceType, labels, colorOf, marks = [], dimOthers, 
       for (let c = 0; c < n; c++) {
         const idx = f * n * n + r * n + c;
         const color = colorOf ? colorOf[idx] : f;
-        const slot = slotAt.get(idx);
+        const slotAll = slotAt.get(idx);
+        const hidden = !!slotAll && !!visibleSlots && !visibleSlots.has(slotAll);
+        const slot = hidden ? undefined : slotAll;
         const mark = slot ? markOf.get(slot) : undefined;
         const x = ox + c * cell;
         const y = oy + r * cell;
-        const dim = dimOthers && !mark;
+        if (slot) slotPos.set(slot, { x, y });
+        const dim = (dimOthers && !mark) || hidden;
         rects.push(
           <rect
             key={idx}
@@ -77,10 +102,18 @@ export function CubeNet({ n, pieceType, labels, colorOf, marks = [], dimOthers, 
             {slot && <title>{labels?.[slot] || slot}</title>}
           </rect>,
         );
-        if (slot && (labels?.[slot] || mark)) {
-          const text = mark === 'buffer' ? '★' : mark === 'first' ? '1' : mark === 'second' ? '2' : labels?.[slot] ?? '';
+        const number = slot ? String(STICKER_IDS.indexOf(slot) + 1) : '';
+        if (slot && (labels?.[slot] || mark || showNumbers)) {
+          const label = labels?.[slot] ?? '';
+          const text = mark === 'buffer' ? '★' : mark === 'first' ? '1' : mark === 'second' ? '2' : label || number;
           const len = Array.from(text).length;
           const fs = len <= 1 ? 6 : len === 2 ? 4.4 : 3.4;
+          if (showNumbers && label && !mark)
+            texts.push(
+              <text key={`n${idx}`} x={x + 1.1} y={y + 2.6} fontSize={2.2} className="net-number" pointerEvents="none">
+                {number}
+              </text>,
+            );
           texts.push(
             <text
               key={`t${idx}`}
@@ -88,7 +121,7 @@ export function CubeNet({ n, pieceType, labels, colorOf, marks = [], dimOthers, 
               y={y + cell / 2 + fs * 0.36}
               fontSize={fs}
               textAnchor="middle"
-              className={mark ? 'net-label net-label-mark' : 'net-label'}
+              className={mark ? 'net-label net-label-mark' : label ? 'net-label' : 'net-label net-number'}
               pointerEvents="none"
             >
               {text}
@@ -97,10 +130,44 @@ export function CubeNet({ n, pieceType, labels, colorOf, marks = [], dimOthers, 
         }
       }
   }
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth, display: 'block' }} role="img" aria-label={title ?? 'キューブの展開図'}>
+  const svg = (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }} role="img" aria-label={title ?? 'キューブの展開図'}>
       {rects}
       {texts}
     </svg>
+  );
+  const editPos = editingId ? slotPos.get(editingId) : undefined;
+  return (
+    <div className="net-wrap" style={{ maxWidth }}>
+      {svg}
+      {editingId && editPos && onEditDone && (
+        <input
+          key={editingId}
+          className="net-edit"
+          autoFocus
+          defaultValue={labels?.[editingId] ?? ''}
+          aria-label={`${editingId} の文字`}
+          style={{
+            left: `${((editPos.x - cell * 0.6) / W) * 100}%`,
+            top: `${((editPos.y - cell * 0.25) / H) * 100}%`,
+            width: `${((cell * 2.2) / W) * 100}%`,
+          }}
+          onFocus={(e) => e.target.select()}
+          onKeyDown={(e) => {
+            const v = (e.target as HTMLInputElement).value;
+            if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+              e.preventDefault();
+              onEditDone(editingId, v, 'next');
+            } else if (e.key === 'Tab' && e.shiftKey) {
+              e.preventDefault();
+              onEditDone(editingId, v, 'prev');
+            } else if (e.key === 'Escape') {
+              onEditDone(editingId, labels?.[editingId] ?? '', 'stay');
+            }
+          }}
+          onBlur={(e) => onEditDone(editingId, e.target.value, 'stay')}
+        />
+      )}
+    </div>
   );
 }

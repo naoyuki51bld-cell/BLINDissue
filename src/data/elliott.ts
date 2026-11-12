@@ -7,6 +7,10 @@ export interface ElliottData {
   source: string;
   edge: Record<string, Record<string, Record<string, string>>>;
   corner: Record<string, Record<string, Record<string, string>>>;
+  /** パリティ: バッファ → 最後のターゲット → 手順 */
+  parity?: Record<string, Record<string, string>>;
+  /** フリップ: エッジ → エッジ → 手順 */
+  flip?: Record<string, Record<string, string>>;
 }
 
 export const ELLIOTT_NAME = 'Elliott';
@@ -52,4 +56,34 @@ export function elliottBuffers(data: ElliottData, pt: PieceType): StickerId[] {
   return Object.keys(data[pt])
     .map((n) => idFromName(pt, n))
     .filter((x): x is StickerId => !!x);
+}
+
+/** パリティの手順（キー: "バッファ|ターゲット"） */
+export function elliottParity(data: ElliottData): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [bufName, rows] of Object.entries(data.parity ?? {})) {
+    const buf = idFromName('corner', bufName);
+    if (!buf) continue;
+    for (const [tName, alg] of Object.entries(rows)) {
+      const t = idFromName('corner', tName);
+      if (t) out[`${buf}|${t}`] = bracketize(alg);
+    }
+  }
+  return out;
+}
+
+/** フリップの手順（キー: 代表ステッカー 2 つを並べ替えた "A|B"） */
+export function elliottFlips(data: ElliottData, refOf: (id: StickerId) => StickerId, order: (a: StickerId, b: StickerId) => [StickerId, StickerId]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [aName, row] of Object.entries(data.flip ?? {})) {
+    const a = idFromName('edge', aName);
+    if (!a) continue;
+    for (const [bName, alg] of Object.entries(row)) {
+      const b = idFromName('edge', bName);
+      if (!b) continue;
+      const [x, y] = order(refOf(a), refOf(b));
+      out[`${x}|${y}`] = bracketize(alg);
+    }
+  }
+  return out;
 }

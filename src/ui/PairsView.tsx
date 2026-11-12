@@ -4,6 +4,7 @@ import { labelOf, pairReading, pairText } from '../data/labels';
 import { pairReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '../data/store';
 import { avgTime, formatSec } from '../data/srs';
 import { Modal, PieceTabs, StatusBadge, useCases, usePersisted, useTargets } from './shared';
+import { PairTable, TableLegend, TableOptions, timeTone, useTableOptions } from './PairTable';
 
 /** そのパーツの文字の割り振りで現れるレターペアの一覧 */
 export function usePairList(pt: PieceType) {
@@ -30,6 +31,8 @@ export function PairsView() {
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
+  const [view, setView] = usePersisted<'list' | 'grid'>('pairs.view', 'list');
+  const opts = useTableOptions();
   const cfg = useStore((s) => s.pieces[pt]);
   const pairs = useStore((s) => s.pairs);
   const reviews = useStore((s) => s.reviews);
@@ -39,6 +42,10 @@ export function PairsView() {
   const firsts = useMemo(() => [...new Set(targets.map((t) => labelOf(pt, cfg, t)))], [targets, pt, cfg]);
 
   const registered = list.filter((p) => pairs[p.pair]?.word).length;
+  const cases = useCases(pt, cfg.buffer);
+  const validSet = useMemo(() => new Set(cases.map(([a, b]) => `${a}|${b}`)), [cases]);
+  const validPair = (a: string, b: string) => validSet.has(`${a}|${b}`);
+  const firstTargets = targets;
   const q = query.trim().toLowerCase();
   const visible = list.filter((p) => {
     const e = pairs[p.pair];
@@ -49,6 +56,8 @@ export function PairsView() {
       return false;
     return true;
   });
+
+  const visibleSet = new Set(visible.map((p) => p.pair));
 
   return (
     <div className="page">
@@ -62,6 +71,14 @@ export function PairsView() {
         </div>
       </div>
       <div className="toolbar">
+        <div className="segmented">
+          <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>
+            一覧
+          </button>
+          <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}>
+            表
+          </button>
+        </div>
         <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="絞り込み">
           <option value="all">すべて</option>
           <option value="missing">イメージ未登録</option>
@@ -73,6 +90,28 @@ export function PairsView() {
         </select>
         <input className="search" type="search" placeholder="ペア・イメージで検索" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
+      {view === 'grid' && (
+        <div className="stack">
+          <TableOptions opts={opts} />
+          <PairTable
+            rows={firstTargets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }))}
+            cols={firstTargets.map((t) => ({ id: t, label: labelOf(pt, cfg, t) }))}
+            showText={opts.showText}
+            onOpen={(a, b) => setEditing(pairText(pt, cfg, a, b))}
+            cell={(a, b) => {
+              if (!validPair(a, b)) return null;
+              const pair = pairText(pt, cfg, a, b);
+              const e = pairs[pair];
+              const rv = reviews[pairReviewKey(pair)];
+              if (!visibleSet.has(pair)) return { text: '', tone: 'untested' };
+              const tone = opts.color === 'time' ? (e?.word ? timeTone(rv, opts.slowSec) : 'none') : e?.status ?? 'none';
+              return { text: e?.word ?? '', tone, title: `${pair}: ${e?.word || '未登録'}` };
+            }}
+          />
+          <TableLegend mode={opts.color} slowSec={opts.slowSec} />
+        </div>
+      )}
+      {view === 'list' && (
       <div className="chips scroll" aria-label="1 文字目">
         <button className={first === 'all' ? 'chip small active' : 'chip small'} onClick={() => setFirst('all')}>
           全部
@@ -83,6 +122,8 @@ export function PairsView() {
           </button>
         ))}
       </div>
+      )}
+      {view === 'list' && (
       <ul className="case-list">
         {visible.map((p) => {
           const e = pairs[p.pair];
@@ -118,6 +159,7 @@ export function PairsView() {
         })}
         {visible.length === 0 && <li className="muted empty">該当するペアはありません</li>}
       </ul>
+      )}
       {editing && <PairEditor pair={editing} reading={pairReading(cfg, editing)} onClose={() => setEditing(null)} />}
     </div>
   );
@@ -164,7 +206,7 @@ function PairEditor({ pair, reading, onClose }: { pair: string; reading: string 
             ))}
           </div>
         </div>
-        {rv && (
+        {rv && rv.reps + rv.lapses > 0 && (
           <p className="muted small">
             練習 {rv.reps + rv.lapses} 回 ・ 平均想起 {formatSec(avgTime(rv))} 秒 ・ ミス {rv.lapses} 回{' '}
             <button className="link" onClick={() => resetReview(pairReviewKey(pair))}>

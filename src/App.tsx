@@ -6,6 +6,9 @@ import { PairsView } from './ui/PairsView';
 import { PracticeView } from './ui/PracticeView';
 import { SchemeEditor } from './ui/SchemeEditor';
 import { usePersisted } from './ui/shared';
+import { SyncPanel } from './ui/SyncPanel';
+import { useStore } from './data/store';
+import { initSync } from './sync/firebase';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'home', label: 'ホーム', icon: '⌂' },
@@ -21,6 +24,10 @@ export function App() {
   useEffect(() => {
     // ブラウザがデータを勝手に消さないようにお願いする（対応ブラウザのみ）
     navigator.storage?.persist?.().catch(() => undefined);
+    // 保存済みのデータを読み込んでから同期を始める
+    const begin = () => initSync().catch(() => undefined);
+    if (useStore.persist.hasHydrated()) begin();
+    else return useStore.persist.onFinishHydration(begin);
   }, []);
 
   useEffect(() => {
@@ -46,6 +53,7 @@ export function App() {
         {tab === 'practice' && <PracticeView />}
         {tab === 'settings' && (
           <div className="page">
+            <SyncPanel />
             <SchemeEditor />
             <ImportPanel />
             <ExportPanel />

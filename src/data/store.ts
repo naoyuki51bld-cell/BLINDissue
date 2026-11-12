@@ -3,7 +3,7 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 import { del, get, set } from 'idb-keyval';
 import { DEFAULT_SIZE, PIECE_TYPES, type PieceType, type StickerId } from '../cube/pieces';
 import { labelsFromList, PRESETS, type Labels } from './schemes';
-import { review, type Grade, type ReviewState } from './srs';
+import { newReview, review, type Grade, type ReviewState } from './srs';
 
 export type Status = 'none' | 'learning' | 'learned' | 'auto';
 export const STATUS_LABEL: Record<Status, string> = {
@@ -20,6 +20,8 @@ export interface PieceConfig {
   size: number;
   /** ペアをローマ字→かな読みで併記する */
   kana: boolean;
+  /** 同期用の更新時刻 */
+  updatedAt?: number;
 }
 
 export interface AlgEntry {
@@ -103,7 +105,7 @@ export const useStore = create<AppData & Actions>()(
     (setState) => ({
       ...defaultData(),
       setPiece: (pt, patch) =>
-        setState((s) => ({ pieces: { ...s.pieces, [pt]: { ...s.pieces[pt], ...patch } } })),
+        setState((s) => ({ pieces: { ...s.pieces, [pt]: { ...s.pieces[pt], ...patch, updatedAt: Date.now() } } })),
       setAlg: (key, patch) =>
         setState((s) => ({
           algs: { ...s.algs, [key]: { ...(s.algs[key] ?? emptyAlg()), ...patch, updatedAt: Date.now() } },
@@ -115,12 +117,9 @@ export const useStore = create<AppData & Actions>()(
             algs[k] = { ...(algs[k] ?? emptyAlg()), ...patch, updatedAt: Date.now() };
           return { algs };
         }),
+      // 同期のため、消すときも「空にした」という記録を残す
       deleteAlg: (key) =>
-        setState((s) => {
-          const algs = { ...s.algs };
-          delete algs[key];
-          return { algs };
-        }),
+        setState((s) => ({ algs: { ...s.algs, [key]: { ...emptyAlg(), updatedAt: Date.now() } } })),
       setPair: (pair, patch) =>
         setState((s) => ({
           pairs: { ...s.pairs, [pair]: { ...(s.pairs[pair] ?? emptyPair()), ...patch, updatedAt: Date.now() } },
@@ -134,13 +133,11 @@ export const useStore = create<AppData & Actions>()(
         }),
       recordReview: (key, grade, timeMs, execMs) =>
         setState((s) => ({ reviews: { ...s.reviews, [key]: review(s.reviews[key], grade, timeMs, Date.now(), execMs) } })),
-      resetReview: (key) =>
-        setState((s) => {
-          const reviews = { ...s.reviews };
-          delete reviews[key];
-          return { reviews };
-        }),
-      replaceAll: (data) => setState(() => ({ ...defaultData(), ...data })),
+      resetReview: (key) => setState((s) => ({ reviews: { ...s.reviews, [key]: { ...newReview(), lastReviewed: Date.now() } } })),
+      replaceAll: (data) => {
+        setState(() => ({ ...defaultData(), ...data }));
+        replaceListeners.forEach((fn) => fn());
+      },
     }),
     {
       name: 'bld-trainer',
@@ -159,6 +156,9 @@ export const useStore = create<AppData & Actions>()(
     },
   ),
 );
+
+/** バックアップの復元・初期化（同期で使う） */
+export const replaceListeners = new Set<() => void>();
 
 export function exportData(): AppData {
   const s = useStore.getState();

@@ -4,7 +4,8 @@ import { useStore } from '../data/store';
 import { formatSec, type Grade } from '../data/srs';
 import { bluetoothSupport, useSmartCube } from '../smartcube/connection';
 import { AttemptTracker, COLOR_NAMES, turnToString, validFronts } from '../smartcube/tracker';
-import { GRADES, Summary, type Card, type Result } from './PracticeView';
+import { GRADES, NextCard, Summary, type Card, type Result } from './PracticeView';
+import { checkSpecialState } from '../cube/special';
 
 export function smartDebug(): boolean {
   return typeof window !== 'undefined' && /[?&]debug\b/.test(window.location.search);
@@ -110,9 +111,13 @@ export function SmartSession({
   const card = cards[index];
 
   const tracker = useMemo(() => {
+    if (card?.special) {
+      const sc = card.special;
+      return new AttemptTracker((st) => checkSpecialState(sc, st).ok, card.answer[0]);
+    }
     if (!card?.target) return null;
     const t = card.target;
-    return new AttemptTracker(t.pt, t.buffer, t.a, t.b, card.answer[0]);
+    return AttemptTracker.forCase(t.pt, t.buffer, t.a, t.b, card.answer[0]);
     // 同じカードが再出題されたときも新しく作る
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card, index]);
@@ -206,6 +211,7 @@ export function SmartSession({
       <div className="progress thin">
         <span className="seg seg-learned" style={{ width: `${(index / cards.length) * 100}%` }} />
       </div>
+      <NextCard card={cards[index + 1]} />
       {status !== 'connected' && !smartDebug() && (
         <p className="warn small">
           キューブとの接続が切れました。{' '}

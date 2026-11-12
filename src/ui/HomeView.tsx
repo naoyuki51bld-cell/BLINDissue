@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { casesFor, PIECE_EVENTS, PIECE_LABEL, PIECE_TYPES } from '../cube/pieces';
 import { pairText } from '../data/labels';
 import { algKey, algReviewKey, pairReviewKey, STATUSES, useStore } from '../data/store';
-import { avgTime, formatSec, isDue } from '../data/srs';
+import { avgTime, formatSec, isDue, isNew } from '../data/srs';
 import { ProgressBar } from './AlgsView';
 
 export type Tab = 'home' | 'algs' | 'pairs' | 'practice' | 'settings';
@@ -31,7 +31,7 @@ export function HomeView({ go }: { go: (t: Tab) => void }) {
         if (e?.algs.length) {
           registered++;
           const r = reviews[algReviewKey(key)];
-          if (!r || isDue(r, now)) due++;
+          if (isNew(r) || isDue(r, now)) due++;
           const t = avgTime(r);
           if (t !== null) times.push(t);
         }
@@ -48,7 +48,7 @@ export function HomeView({ go }: { go: (t: Tab) => void }) {
 
   const pairDue = useMemo(() => {
     const now = Date.now();
-    return Object.entries(pairs).filter(([p, e]) => e.word && (!reviews[pairReviewKey(p)] || isDue(reviews[pairReviewKey(p)], now))).length;
+    return Object.entries(pairs).filter(([p, e]) => e.word && (isNew(reviews[pairReviewKey(p)]) || isDue(reviews[pairReviewKey(p)], now))).length;
   }, [pairs, reviews]);
 
   const empty = rows.every((r) => r.registered === 0) && Object.keys(pairs).length === 0;

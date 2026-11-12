@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/naoyuki51bld-cell/BLINDissue#readme",
   "dependencies": {
+    "firebase": "^10.14.1",
     "gan-web-bluetooth": "^3.0.2",
     "idb-keyval": "^6.2.1",
     "react": "^18.3.1",
