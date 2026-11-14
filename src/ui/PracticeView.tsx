@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PIECE_LABEL, stickerName, type PieceType, type StickerId } from '../cube/pieces';
+import { casesFor, PIECE_LABEL, stickerName, type PieceType, type StickerId } from '../cube/pieces';
 import { labelOf, pairReading, pairText } from '../data/labels';
 import { algKey, algReviewKey, pairReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '../data/store';
 import { avgTime, formatSec, isDue, isNew, type Grade, type ReviewState } from '../data/srs';
-import { PieceTabs, useCases, usePersisted, useTargets } from './shared';
+import { PieceTabs, usePersisted, useTargets } from './shared';
 import { SmartCubePanel, SmartSession, smartDebug } from './SmartPractice';
 import { useSmartCube } from '../smartcube/connection';
 import { SPECIAL_LABEL, specialKey, type SpecialCase, type SpecialKind } from '../cube/special';
@@ -64,7 +64,10 @@ export function PracticeView() {
   const [firsts, setFirsts] = useState<StickerId[]>([]);
   const [limit, setLimit] = usePersisted<number>('practice.limit', 30);
   const [slowSec, setSlowSec] = usePersisted<number>('practice.slow', 2);
-  const [session, setSession] = useState<Card[] | null>(null);
+  const [session, setSessionState] = useState<{ id: number; cards: Card[] } | null>(null);
+  // 練習を始めるたびに画面を作り直す（「苦手をもう一度」で前の練習の状態が残らないように）
+  const setSession = (cards: Card[] | null) => setSessionState(cards ? { id: Date.now(), cards } : null);
+  const [bufferChoice, setBufferChoice] = usePersisted<Record<string, string>>('practice.buffers', {});
   const [smart, setSmart] = usePersisted<boolean>('practice.smart', false);
   const isSpecial = SPECIAL_CONTENT.includes(content as SpecialKind);
   const smartAvailable = isSpecial || (content === 'alg' && (pt === 'corner' || pt === 'edge'));
@@ -77,8 +80,30 @@ export function PracticeView() {
   const algs = useStore((s) => s.algs);
   const pairs = useStore((s) => s.pairs);
   const reviews = useStore((s) => s.reviews);
-  const cases = useCases(pt, cfg.buffer);
-  const targets = useTargets(pt, cfg.buffer);
+  // 手順を登録してあるバッファ（多い順）
+  const buffersWithAlgs = useMemo(() => {
+    const m = new Map<StickerId, number>();
+    for (const [k, e] of Object.entries(algs)) {
+      if (!k.startsWith(`${pt}|`) || !e.algs.length) continue;
+      const b = k.split('|')[1];
+      m.set(b, (m.get(b) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((x, y) => y[1] - x[1]);
+  }, [algs, pt]);
+  const choice = bufferChoice[pt] ?? 'current';
+  const selectedBuffers: StickerId[] =
+    content !== 'alg' || choice === 'current'
+      ? [cfg.buffer]
+      : choice === 'all'
+        ? buffersWithAlgs.map(([b]) => b)
+        : [choice];
+  const multiBuffer = selectedBuffers.length > 1 || selectedBuffers[0] !== cfg.buffer;
+  const cases = useMemo(
+    () => selectedBuffers.flatMap((buffer) => casesFor(pt, buffer).map(([a, b]) => ({ buffer, a, b }))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pt, selectedBuffers.join(',')],
+  );
+  const targets = useTargets(pt, selectedBuffers[0] ?? cfg.buffer);
 
   const pool = useMemo(() => {
     const cards: (Card & { review?: ReviewState; status: Status })[] = [];
@@ -94,17 +119,17 @@ export function PracticeView() {
       return cards;
     }
     const seenPairs = new Set<string>();
-    for (const [a, b] of cases) {
+    for (const { buffer, a, b } of cases) {
       if (firsts.length && !firsts.includes(a)) continue;
       const pair = pairText(pt, cfg, a, b);
       const reading = pairReading(cfg, pair);
-      const sub = `${stickerName(pt, a)} → ${stickerName(pt, b)}`;
+      const sub = `${multiBuffer ? `バッファ ${stickerName(pt, buffer)}・` : ''}${stickerName(pt, a)} → ${stickerName(pt, b)}`;
       if (content === 'alg') {
-        const key = algKey(pt, cfg.buffer, a, b);
+        const key = algKey(pt, buffer, a, b);
         const e = algs[key];
         if (!e || !e.algs.length) continue;
         const rk = algReviewKey(key);
-        cards.push({ reviewKey: rk, target: { pt, buffer: cfg.buffer, a, b }, prompt: pair, reading, sub, answer: [e.algs[e.main], ...e.algs.filter((_, i) => i !== e.main)], memo: e.memo, review: reviews[rk], status: e.status });
+        cards.push({ reviewKey: rk, target: { pt, buffer, a, b }, prompt: pair, reading, sub, answer: [e.algs[e.main], ...e.algs.filter((_, i) => i !== e.main)], memo: e.memo, review: reviews[rk], status: e.status });
       } else {
         if (seenPairs.has(pair)) continue;
         seenPairs.add(pair);
@@ -115,7 +140,7 @@ export function PracticeView() {
       }
     }
     return cards;
-  }, [cases, firsts, pt, cfg, content, algs, pairs, reviews, isSpecial, cornerCfg, edgeCfg]);
+  }, [cases, firsts, pt, cfg, content, algs, pairs, reviews, isSpecial, cornerCfg, edgeCfg, multiBuffer]);
 
   const filtered = useMemo(() => {
     const now = Date.now();
@@ -135,7 +160,8 @@ export function PracticeView() {
   if (session && useSmart)
     return (
       <SmartSession
-        cards={session}
+        key={session.id}
+        cards={session.cards}
         slowMs={slowSec * 1000}
         title={`${isSpecial ? SPECIAL_LABEL[content as SpecialKind] : PIECE_LABEL[pt]}・スマートキューブ`}
         onExit={() => setSession(null)}
@@ -146,7 +172,8 @@ export function PracticeView() {
   if (session)
     return (
       <Session
-        cards={session}
+        key={session.id}
+        cards={session.cards}
         slowMs={slowSec * 1000}
         title={isSpecial ? SPECIAL_LABEL[content as SpecialKind] : `${PIECE_LABEL[pt]}・${content === 'alg' ? '手順' : 'レターペア'}`}
         onExit={() => setSession(null)}
@@ -169,6 +196,28 @@ export function PracticeView() {
       {!isSpecial && <PieceTabs value={pt} onChange={(p) => { setPt(p); setFirsts([]); }} />}
 
       <section className="card stack">
+        {content === 'alg' && (
+          <label className="field inline">
+            <span className="field-label">バッファ</span>
+            <select
+              value={choice}
+              onChange={(e) => {
+                setBufferChoice({ ...bufferChoice, [pt]: e.target.value });
+                setFirsts([]);
+              }}
+            >
+              <option value="current">今のバッファ（{stickerName(pt, cfg.buffer)}）</option>
+              {buffersWithAlgs
+                .filter(([b]) => b !== cfg.buffer)
+                .map(([b, n]) => (
+                  <option key={b} value={b}>
+                    {stickerName(pt, b)}（{n} ケース登録）
+                  </option>
+                ))}
+              {buffersWithAlgs.length > 1 && <option value="all">すべてのバッファ（{buffersWithAlgs.length} 個）</option>}
+            </select>
+          </label>
+        )}
         <div>
           <div className="field-label">出題範囲</div>
           <div className="segmented">

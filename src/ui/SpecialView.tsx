@@ -21,7 +21,8 @@ import { labelOf } from '../data/labels';
 import { algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type PieceConfig, type Status } from '../data/store';
 import { avgTime, formatSec } from '../data/srs';
 import { Modal, StatusBadge, usePersisted } from './shared';
-import { algOfPlayer, blddbCategoryFor, playersOf, useBlddb } from '../data/blddbLoader';
+import { algOfPlayer, blddbCategoryFor, loadBlddb, playersOf, useBlddb } from '../data/blddbLoader';
+import type { BlddbTable } from '../data/blddb';
 import { SuggestItem, useFavoritePlayer, type SuggestEntry } from './SuggestItem';
 
 const checkCache = new Map<string, SpecialCheck>();
@@ -103,25 +104,27 @@ export function SpecialView({ kind }: { kind: SpecialKind }) {
     return { c, key, e, main, check, ...specialTitle(c, corner, edge) };
   });
   const registered = rows.filter((r) => r.main).length;
-  const blddb = useBlddb(blddbCategoryFor(kind));
   const [source, setSource] = usePersisted<'auto' | 'blddb' | 'player'>('bulk.special.source', 'auto');
+  // BLDDB は「選手を選ぶ」ときだけ先に読み込む
+  const blddb = useBlddb(source === 'player' ? blddbCategoryFor(kind) : null);
   const [player, setPlayer] = useFavoritePlayer();
   const players = useMemo(() => playersOf(blddb.table), [blddb.table]);
-  const pickFor = (c: SpecialCase, key: string): { alg: string; from: string } | undefined => {
+  const pickFor = (c: SpecialCase, key: string, db: BlddbTable | null): { alg: string; from: string } | undefined => {
     const el = elliottFor(c, elliott);
-    const top = blddb.table?.[key]?.[0]?.alg;
+    const top = db?.[key]?.[0]?.alg;
     const chain: [string | undefined, string][] =
-      source === 'auto' ? [[el, 'Elliott'], [top, 'BLDDB']] : source === 'blddb' ? [[top, 'BLDDB']] : [[algOfPlayer(blddb.table, key, player), player]];
+      source === 'auto' ? [[el, 'Elliott'], [top, 'BLDDB']] : source === 'blddb' ? [[top, 'BLDDB']] : [[algOfPlayer(db, key, player), player]];
     for (const [alg, from] of chain) if (alg) return { alg, from };
     return undefined;
   };
-  const fillable = rows.filter((r) => !r.main && pickFor(r.c, r.key));
-  const fill = (replace: boolean) => {
-    const target = replace ? rows : fillable;
+  const missing = rows.filter((r) => !r.main);
+  const fill = async (replace: boolean) => {
+    const db = await loadBlddb(blddbCategoryFor(kind)).then((x) => x.table).catch(() => null);
+    const target = replace ? rows : missing;
     const patch: Record<string, Partial<AlgEntry>> = {};
     const counts = new Map<string, number>();
     for (const r of target) {
-      const p = pickFor(r.c, r.key);
+      const p = pickFor(r.c, r.key, db);
       if (!p || (replace && r.main === p.alg)) continue;
       patch[r.key] = replace ? { algs: [p.alg, ...(r.e?.algs ?? []).filter((x) => x !== p.alg)], main: 0 } : { algs: [p.alg], main: 0 };
       counts.set(p.from, (counts.get(p.from) ?? 0) + 1);
@@ -165,16 +168,16 @@ export function SpecialView({ kind }: { kind: SpecialKind }) {
           )}
         </div>
         <div className="row wrap">
-          {fillable.length > 0 && (
+          {missing.length > 0 && (
             <button className="btn small" onClick={() => fill(false)}>
-              未登録の {fillable.length} ケースに登録
+              未登録の {missing.length} ケースに登録
             </button>
           )}
           <button className="btn small ghost" onClick={() => fill(true)}>
             メインを置き換える（今の手順は候補に残す）
           </button>
         </div>
-        {blddb.status === 'loading' && <p className="muted small">BLDDB の手順を読み込んでいます…</p>}
+        {source === 'player' && blddb.status === 'loading' && <p className="muted small">BLDDB の手順を読み込んでいます…</p>}
         {kind === 'ltct' && <p className="muted small">LTCT は Elliott の表に無いので、BLDDB の手順か手入力で登録してください（入力した手順は自動でチェックします）。</p>}
         {message && <p className="muted small">{message}</p>}
       </div>

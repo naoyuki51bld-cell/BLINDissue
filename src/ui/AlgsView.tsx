@@ -3,7 +3,8 @@ import { PIECE_EVENTS, PIECE_LABEL, PIECE_TYPES, STICKER_IDS, stickerName, type 
 import { bothLabels, labelOf, pairReading, pairText, secondLabelOf } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { loadSuggestions, useElliottBuffers, useElliottTable } from './suggestions';
-import { algOfPlayer, blddbCategoryFor, playersOf, useBlddb } from '../data/blddbLoader';
+import { algOfPlayer, blddbCategoryFor, loadBlddb, playersOf, useBlddb } from '../data/blddbLoader';
+import type { BlddbTable } from '../data/blddb';
 import { useFavoritePlayer } from './SuggestItem';
 import { avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
@@ -179,20 +180,20 @@ function BulkFill({ pt, cases }: { pt: PieceType; cases: [StickerId, StickerId][
   const algs = useStore((s) => s.algs);
   const setAlgsBulk = useStore((s) => s.setAlgsBulk);
   const elliott = useElliottTable(pt, cfg.buffer);
-  const blddb = useBlddb(blddbCategoryFor(pt, cfg.size));
   const [source, setSource] = usePersisted<FillSource>('bulk.source', 'auto');
+  // BLDDB は「選手を選ぶ」ときだけ先に読み込む（それ以外は登録ボタンを押したときに読む）
+  const blddb = useBlddb(source === 'player' ? blddbCategoryFor(pt, cfg.size) : null);
   const [player, setPlayer] = useFavoritePlayer();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const players = useMemo(() => playersOf(blddb.table), [blddb.table]);
   const missing = cases.filter(([a, b]) => !algs[algKey(pt, cfg.buffer, a, b)]?.algs.length);
   const elliottCount = elliott ? cases.filter(([a, b]) => elliott[`${a}|${b}`]).length : 0;
-  const dbCount = blddb.table ? cases.filter(([a, b]) => blddb.table![algKey(pt, cfg.buffer, a, b)]?.length).length : 0;
 
   /** 選んだ方法での手順（無ければ undefined） */
-  const pickFor = (a: StickerId, b: StickerId, generated: Record<string, { alg: string }[]>): { alg: string; from: string } | undefined => {
+  const pickFor = (a: StickerId, b: StickerId, generated: Record<string, { alg: string }[]>, db: BlddbTable | null): { alg: string; from: string } | undefined => {
     const key = algKey(pt, cfg.buffer, a, b);
-    const top = blddb.table?.[key]?.[0]?.alg;
+    const top = db?.[key]?.[0]?.alg;
     const gen = generated[`${a}|${b}`]?.[0]?.alg;
     const el = elliott?.[`${a}|${b}`];
     const chain: [string | undefined, string][] =
@@ -201,7 +202,7 @@ function BulkFill({ pt, cases }: { pt: PieceType; cases: [StickerId, StickerId][
         : source === 'blddb'
           ? [[top, 'BLDDB'], [gen, '自動生成']]
           : source === 'player'
-            ? [[algOfPlayer(blddb.table, key, player), player]]
+            ? [[algOfPlayer(db, key, player), player]]
             : [[gen, '自動生成']];
     for (const [alg, from] of chain) if (alg) return { alg, from };
     return undefined;
@@ -220,10 +221,12 @@ function BulkFill({ pt, cases }: { pt: PieceType; cases: [StickerId, StickerId][
     if (!confirm(msg)) return;
     setBusy(true);
     const generated = source === 'player' ? {} : await loadSuggestions(pt, cfg.size, cfg.buffer);
+    const db =
+      source === 'generated' ? null : await loadBlddb(blddbCategoryFor(pt, cfg.size)).then((c) => c.table).catch(() => null);
     const patch: Record<string, Partial<AlgEntry>> = {};
     const counts = new Map<string, number>();
     for (const [a, b] of target) {
-      const p = pickFor(a, b, generated);
+      const p = pickFor(a, b, generated, db);
       if (!p) continue;
       const key = algKey(pt, cfg.buffer, a, b);
       const cur = algs[key];
@@ -240,12 +243,9 @@ function BulkFill({ pt, cases }: { pt: PieceType; cases: [StickerId, StickerId][
   return (
     <div className="stack bulk">
       <p className="muted small">
-        {elliott && `Elliott の手順表 ${elliottCount} ケース`}
-        {elliott && blddb.table && '・'}
-        {blddb.table && `BLDDB ${dbCount} ケース`}
-        {blddb.status === 'loading' && 'BLDDB を読み込み中…'}
-        {blddb.status === 'error' && 'BLDDB を読み込めませんでした'}
-        {(elliott || blddb.table) && ' の手順があります。'}
+        {elliott && `このバッファには Elliott の手順表があります（${elliottCount} ケース）。`}
+        {source === 'player' && blddb.status === 'loading' && 'BLDDB を読み込み中…'}
+        {source === 'player' && blddb.status === 'error' && 'BLDDB を読み込めませんでした（オフラインの可能性があります）。'}
       </p>
       <div className="row wrap">
         <label className="field inline">
