@@ -3,6 +3,7 @@ import { PIECE_LABEL, PIECE_TYPES, STICKER_IDS, stickerName, VALID_SIZES, type P
 import { duplicateLabels, labelsFromList, PRESETS, splitLabelInput } from '../data/schemes';
 import { useStore } from '../data/store';
 import { CubeNet } from './CubeNet';
+import { BufferOrderEditor } from './BufferOrder';
 import { PieceTabs, Section, usePersisted } from './shared';
 
 
@@ -179,6 +180,10 @@ export function SchemeEditor() {
         ペアがローマ字として読めるとき、かなの読みを併記する（例: K + A → か）
       </label>
       <p className="muted small">バッファを変えると、そのバッファ用の手順表に切り替わります（元の手順は消えません）。手順タブからも切り替えられます。</p>
+      <div>
+        <div className="field-label">バッファの順番（フローティング）</div>
+        <BufferOrderEditor pt={pt} />
+      </div>
 
       <div className="stack">
         <div className="field-label">プリセット・コピー</div>

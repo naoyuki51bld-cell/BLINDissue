@@ -1261,3 +1261,39 @@ details summary {
 .field.inline .field-label {
   white-space: nowrap;
 }
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.order-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.order-list li.current {
+  border-color: var(--accent);
+}
+.order-rank {
+  font-weight: 800;
+  width: 1.4em;
+  text-align: center;
+  color: var(--accent);
+}
+.order-name {
+  text-align: left;
+}
+.icon-btn.small {
+  width: 30px;
+  height: 30px;
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+}

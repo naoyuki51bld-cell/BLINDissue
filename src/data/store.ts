@@ -21,6 +21,8 @@ export interface PieceConfig {
   labels2?: Labels;
   /** 1 文字目と 2 文字目で別の文字を使う（例: 1 文字目は子音、2 文字目は母音） */
   dual?: boolean;
+  /** バッファの順番（フローティング）。1 番目がメインのバッファ */
+  bufferOrder?: StickerId[];
   buffer: StickerId;
   size: number;
   /** ペアをローマ字→かな読みで併記する */

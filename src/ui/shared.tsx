@@ -3,6 +3,7 @@ import { casesFor, PIECE_LABEL, PIECE_TYPES, targetsFor, type PieceType, type St
 import { verifyAlg, type VerifyResult } from '../cube/verify';
 import { useStore, type PieceConfig, type Status, STATUS_LABEL } from '../data/store';
 import { labelOf } from '../data/labels';
+import { earlierBuffers } from '../data/buffers';
 
 const verifyCache = new Map<string, VerifyResult>();
 
@@ -17,12 +18,17 @@ export function cachedVerify(pt: PieceType, cfg: PieceConfig, a: StickerId, b: S
   return r;
 }
 
+/** そのバッファのケース（バッファの順番で前にあるバッファのパーツは除く） */
 export function useCases(pt: PieceType, buffer: StickerId) {
-  return useMemo(() => casesFor(pt, buffer), [pt, buffer]);
+  const cfg = useStore((s) => s.pieces[pt]);
+  const ex = earlierBuffers(pt, cfg, buffer);
+  return useMemo(() => casesFor(pt, buffer, ex), [pt, buffer, ex.join(',')]);
 }
 
 export function useTargets(pt: PieceType, buffer: StickerId) {
-  return useMemo(() => targetsFor(pt, buffer), [pt, buffer]);
+  const cfg = useStore((s) => s.pieces[pt]);
+  const ex = earlierBuffers(pt, cfg, buffer);
+  return useMemo(() => targetsFor(pt, buffer, ex), [pt, buffer, ex.join(',')]);
 }
 
 export function PieceTabs({ value, onChange }: { value: PieceType; onChange: (pt: PieceType) => void }) {

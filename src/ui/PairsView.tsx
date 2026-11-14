@@ -5,11 +5,13 @@ import { pairReviewKey, STATUSES, STATUS_LABEL, useStore, type Status } from '..
 import { avgTime, formatSec } from '../data/srs';
 import { Modal, PieceTabs, StatusBadge, useCases, usePersisted, useTargets } from './shared';
 import { PairTable, TableLegend, TableOptions, timeTone, useTableOptions } from './PairTable';
+import { bufferOrder } from '../data/buffers';
 
 /** そのパーツの文字の割り振りで現れるレターペアの一覧 */
 export function usePairList(pt: PieceType) {
   const cfg = useStore((s) => s.pieces[pt]);
-  const cases = useCases(pt, cfg.buffer);
+  // レターペアはメインのバッファ（順番の 1 番目）の全ターゲットで作る
+  const cases = useCases(pt, bufferOrder(cfg)[0]);
   return useMemo(() => {
     const seen = new Set<string>();
     const out: { pair: string; first: string }[] = [];
@@ -38,11 +40,11 @@ export function PairsView() {
   const reviews = useStore((s) => s.reviews);
   const setPair = useStore((s) => s.setPair);
   const list = usePairList(pt);
-  const targets = useTargets(pt, cfg.buffer);
+  const targets = useTargets(pt, bufferOrder(cfg)[0]);
   const firsts = useMemo(() => [...new Set(targets.map((t) => labelOf(pt, cfg, t)))], [targets, pt, cfg]);
 
   const registered = list.filter((p) => pairs[p.pair]?.word).length;
-  const cases = useCases(pt, cfg.buffer);
+  const cases = useCases(pt, bufferOrder(cfg)[0]);
   const validSet = useMemo(() => new Set(cases.map(([a, b]) => `${a}|${b}`)), [cases]);
   const validPair = (a: string, b: string) => validSet.has(`${a}|${b}`);
   const firstTargets = targets;

@@ -5,6 +5,7 @@ import { algKey, defaultData, exportData, isAppData, useStore, type AlgEntry, ty
 import { importAlgTable, importPairTable } from '../io/importer';
 import { download, parseDelimited, readExcel, toCsv, writeExcel, type Table } from '../io/table';
 import { usePersisted, PieceTabs, Section } from './shared';
+import { earlierBuffers } from '../data/buffers';
 
 type Policy = 'overwrite' | 'fill' | 'append';
 
@@ -217,7 +218,7 @@ function PolicyPicker({ policy, setPolicy, allowAppend }: { policy: Policy; setP
 function algMatrix(pt: PieceType): Table {
   const s = useStore.getState();
   const cfg = s.pieces[pt];
-  const targets = targetsFor(pt, cfg.buffer);
+  const targets = targetsFor(pt, cfg.buffer, earlierBuffers(pt, cfg, cfg.buffer));
   const header = ['', ...targets.map((t) => secondLabelOf(pt, cfg, t))];
   const rows = targets.map((a) => [
     labelOf(pt, cfg, a),

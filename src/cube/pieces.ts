@@ -157,14 +157,16 @@ export function samePiece(pt: PieceType, a: StickerId, b: StickerId): boolean {
   return pieceStickers(stickerIndex(pt, a, n), n).includes(stickerIndex(pt, b, n));
 }
 
-/** バッファ以外のターゲットのうち、バッファと同じパーツでないもの */
-export function targetsFor(pt: PieceType, buffer: StickerId): StickerId[] {
-  return STICKER_IDS.filter((id) => !samePiece(pt, id, buffer));
+/**
+ * ターゲットになりうるステッカー: バッファと同じパーツ、および exclude（先に使うバッファ）と同じパーツを除く
+ */
+export function targetsFor(pt: PieceType, buffer: StickerId, exclude: StickerId[] = []): StickerId[] {
+  return STICKER_IDS.filter((id) => !samePiece(pt, id, buffer) && !exclude.some((x) => samePiece(pt, id, x)));
 }
 
 /** バッファに対する全ケース（first, second） */
-export function casesFor(pt: PieceType, buffer: StickerId): [StickerId, StickerId][] {
-  const t = targetsFor(pt, buffer);
+export function casesFor(pt: PieceType, buffer: StickerId, exclude: StickerId[] = []): [StickerId, StickerId][] {
+  const t = targetsFor(pt, buffer, exclude);
   const out: [StickerId, StickerId][] = [];
   for (const a of t) for (const b of t) if (!samePiece(pt, a, b)) out.push([a, b]);
   return out;

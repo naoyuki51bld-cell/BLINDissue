@@ -4,6 +4,7 @@ import { pairText } from '../data/labels';
 import { algKey, algReviewKey, pairReviewKey, STATUSES, useStore } from '../data/store';
 import { avgTime, formatSec, isDue, isNew } from '../data/srs';
 import { ProgressBar } from './AlgsView';
+import { earlierBuffers } from '../data/buffers';
 
 export type Tab = 'home' | 'algs' | 'pairs' | 'practice' | 'settings';
 
@@ -17,7 +18,7 @@ export function HomeView({ go }: { go: (t: Tab) => void }) {
     const now = Date.now();
     return PIECE_TYPES.map((pt) => {
       const cfg = pieces[pt];
-      const cases = casesFor(pt, cfg.buffer);
+      const cases = casesFor(pt, cfg.buffer, earlierBuffers(pt, cfg, cfg.buffer));
       let registered = 0;
       let due = 0;
       let times: number[] = [];

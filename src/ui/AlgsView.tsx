@@ -6,6 +6,8 @@ import { loadSuggestions, useElliottBuffers, useElliottTable } from './suggestio
 import { algOfPlayer, blddbCategoryFor, loadBlddb, playersOf, useBlddb } from '../data/blddbLoader';
 import type { BlddbTable } from '../data/blddb';
 import { useFavoritePlayer } from './SuggestItem';
+import { BufferOrderEditor } from './BufferOrder';
+import { bufferOrder } from '../data/buffers';
 import { avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
 import { cachedVerify, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
@@ -290,17 +292,35 @@ function BufferPicker({ pt }: { pt: PieceType }) {
   const cfg = useStore((s) => s.pieces[pt]);
   const setPiece = useStore((s) => s.setPiece);
   const withSheet = useElliottBuffers(pt);
+  const order = bufferOrder(cfg);
+  const others = STICKER_IDS.filter((id) => !order.includes(id));
+  const label = (id: StickerId) => `${stickerName(pt, id)}（${bothLabels(pt, cfg, id)}）${withSheet.includes(id) ? ' ・Elliott 表あり' : ''}`;
   return (
-    <label className="field inline">
-      <span className="field-label">バッファ</span>
-      <select value={cfg.buffer} onChange={(e) => setPiece(pt, { buffer: e.target.value })}>
-        {STICKER_IDS.map((id) => (
-          <option key={id} value={id}>
-            {stickerName(pt, id)}（{bothLabels(pt, cfg, id)}）{withSheet.includes(id) ? ' ・Elliott 表あり' : ''}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="stack">
+      <label className="field inline">
+        <span className="field-label">バッファ</span>
+        <select value={cfg.buffer} onChange={(e) => setPiece(pt, { buffer: e.target.value })}>
+          <optgroup label="バッファの順番">
+            {order.map((id, i) => (
+              <option key={id} value={id}>
+                {i + 1} 番目: {label(id)}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="ほかのステッカー">
+            {others.map((id) => (
+              <option key={id} value={id}>
+                {label(id)}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </label>
+      <details>
+        <summary className="muted small">バッファの順番を編集（フローティング）</summary>
+        <BufferOrderEditor pt={pt} />
+      </details>
+    </div>
   );
 }
 

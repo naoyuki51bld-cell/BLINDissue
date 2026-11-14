@@ -6,6 +6,7 @@ import { avgTime, formatSec, isDue, isNew, type Grade, type ReviewState } from '
 import { PieceTabs, usePersisted, useTargets } from './shared';
 import { SmartCubePanel, SmartSession, smartDebug } from './SmartPractice';
 import { useSmartCube } from '../smartcube/connection';
+import { bufferOrder, bufferRank, earlierBuffers } from '../data/buffers';
 import { SPECIAL_LABEL, specialKey, type SpecialCase, type SpecialKind } from '../cube/special';
 import { specialCasesFor, specialTitle } from './SpecialView';
 
@@ -88,8 +89,11 @@ export function PracticeView() {
       const b = k.split('|')[1];
       m.set(b, (m.get(b) ?? 0) + 1);
     }
-    return [...m.entries()].sort((x, y) => y[1] - x[1]);
-  }, [algs, pt]);
+    // バッファの順番 → 登録数の多い順
+    const order = bufferOrder(cfg);
+    const rank = (b: StickerId) => (order.includes(b) ? order.indexOf(b) : 99);
+    return [...m.entries()].sort((x, y) => rank(x[0]) - rank(y[0]) || y[1] - x[1]);
+  }, [algs, pt, cfg]);
   const choice = bufferChoice[pt] ?? 'current';
   const selectedBuffers: StickerId[] =
     content !== 'alg' || choice === 'current'
@@ -99,9 +103,9 @@ export function PracticeView() {
         : [choice];
   const multiBuffer = selectedBuffers.length > 1 || selectedBuffers[0] !== cfg.buffer;
   const cases = useMemo(
-    () => selectedBuffers.flatMap((buffer) => casesFor(pt, buffer).map(([a, b]) => ({ buffer, a, b }))),
+    () => selectedBuffers.flatMap((buffer) => casesFor(pt, buffer, earlierBuffers(pt, cfg, buffer)).map(([a, b]) => ({ buffer, a, b }))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pt, selectedBuffers.join(',')],
+    [pt, selectedBuffers.join(','), (cfg.bufferOrder ?? []).join(',')],
   );
   const targets = useTargets(pt, selectedBuffers[0] ?? cfg.buffer);
 
@@ -211,6 +215,7 @@ export function PracticeView() {
                 .filter(([b]) => b !== cfg.buffer)
                 .map(([b, n]) => (
                   <option key={b} value={b}>
+                    {bufferRank(pt, cfg, b) ? `${bufferRank(pt, cfg, b)} 番目: ` : ''}
                     {stickerName(pt, b)}（{n} ケース登録）
                   </option>
                 ))}
