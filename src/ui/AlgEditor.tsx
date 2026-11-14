@@ -8,6 +8,8 @@ import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, 
 import { avgExecTime, avgTime, formatSec } from '../data/srs';
 import { CubeNet } from './CubeNet';
 import { useElliottTable, useSuggestions } from './suggestions';
+import { blddbCategoryFor, useBlddb } from '../data/blddbLoader';
+import { SuggestItem, useFavoritePlayer, type SuggestEntry } from './SuggestItem';
 import { ELLIOTT_NAME } from '../data/elliott';
 import { cachedVerify, Modal, VerifyBadge } from './shared';
 
@@ -52,11 +54,17 @@ function SuggestionList({
   const table = useSuggestions(pt, cfg.size, cfg.buffer);
   const elliott = useElliottTable(pt, cfg.buffer);
   const [open, setOpen] = useState(true);
+  const blddb = useBlddb(blddbCategoryFor(pt, cfg.size));
+  const [favorite] = useFavoritePlayer();
   const fromSheet = elliott?.[`${a}|${b}`];
   const generated = table?.[`${a}|${b}`] ?? [];
-  const list: { alg: string; moves: number | null; source?: string }[] = [
+  const fromDb = (blddb.table?.[algKey(pt, cfg.buffer, a, b)] ?? [])
+    .slice()
+    .sort((x, y) => Number(y.users.includes(favorite)) - Number(x.users.includes(favorite)));
+  const list: SuggestEntry[] = [
     ...(fromSheet ? [{ alg: fromSheet, moves: safeMoveCount(fromSheet), source: ELLIOTT_NAME }] : []),
-    ...generated.filter((g) => g.alg !== fromSheet),
+    ...fromDb.slice(0, 6).map((d) => ({ alg: d.alg, moves: safeMoveCount(d.alg), source: 'BLDDB', users: d.users, note: d.note })),
+    ...generated.filter((g) => g.alg !== fromSheet).map((g) => ({ ...g, source: undefined })),
   ];
   const have = new Set(current.map((x) => x.replace(/\s+/g, ' ').trim()));
   return (
@@ -68,37 +76,21 @@ function SuggestionList({
       {open && (
         <>
           {!table && !fromSheet && <p className="muted small">候補を計算しています…（初回のみ数秒かかります）</p>}
+          {blddb.status === 'loading' && <p className="muted small">BLDDB の手順を読み込んでいます…（初回のみ）</p>}
+          {blddb.status === 'error' && <p className="muted small">BLDDB を読み込めませんでした（オフラインの可能性があります）。</p>}
           {table && list.length === 0 && (
             <p className="muted small">このケースは短い交換子では見つかりませんでした（9 手以上の特殊な手順が必要なケースです）。下の欄に手入力してください。</p>
           )}
           <ul className="suggest-list">
-            {list.map((s) => {
-              const added = have.has(s.alg);
-              return (
-                <li key={s.alg}>
-                  <span className="suggest-alg">
-                    {s.source && <span className="source-tag">{s.source}</span>}
-                    {s.alg}
-                  </span>
-                  <span className="muted small">{s.moves !== null ? `${s.moves} 手` : ''}</span>
-                  <span className="row">
-                    <button className="btn small primary" disabled={added} onClick={() => onPick(s.alg, true)}>
-                      {added ? '追加済み' : 'メインにする'}
-                    </button>
-                    {!added && (
-                      <button className="btn small" onClick={() => onPick(s.alg, false)}>
-                        候補に追加
-                      </button>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
+            {list.map((s) => (
+              <SuggestItem key={`${s.source ?? 'gen'}:${s.alg}`} s={s} added={have.has(s.alg)} onPick={onPick} />
+            ))}
           </ul>
           {list.length > 0 && (
             <p className="muted small">
-              {fromSheet && 'Elliott の手順表（Full Floating & More）の手順を先頭に、'}
-              自動生成の候補は手数と回しやすさ（R・U 中心か、B や S が少ないか）で並べています。
+              {fromSheet && 'Elliott の手順表の手順、'}
+              {fromDb.length > 0 && 'BLDDB で使っている人が多い順の手順、'}
+              自動生成の候補（手数と回しやすさ順）の順に並べています。{favorite && `★ は ${favorite} さんが使っている手順です。`}
             </p>
           )}
         </>

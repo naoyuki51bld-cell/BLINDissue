@@ -149,15 +149,19 @@ function effectOf(alg: string): CubeState | string {
   }
 }
 
-/** エッジがちょうど 1 組だけ（向きそのままで）入れ替わっているか。入れ替わりの名前を返す */
+/**
+ * エッジがちょうど 1 組だけ入れ替わっているか。入れ替わりの名前を返す。
+ * 向きそのままの交換（UF⇔UR）のほか、向きを変える交換（UF⇔RU のようにステッカー同士がずれる）も認める。
+ */
 function singleEdgeSwap(a: Analysis): string | null {
   const moved = a.edges.map((s, i) => ({ s, i })).filter(({ s, i }) => s.piece !== i || s.twist !== 0);
   if (moved.length !== 2) return null;
   const [x, y] = moved;
-  if (x.s.piece !== y.i || y.s.piece !== x.i || x.s.twist !== 0 || y.s.twist !== 0) return null;
-  return `${pieceName('edge', x.i)}⇔${pieceName('edge', y.i)}`;
+  if (x.s.piece !== y.i || y.s.piece !== x.i || x.s.twist !== y.s.twist) return null;
+  const nx = pieceName('edge', x.i);
+  const ny = pieceName('edge', y.i);
+  return x.s.twist === 0 ? `${nx}⇔${ny}` : `${nx}⇔${ny[1]}${ny[0]}`;
 }
-
 
 function checkWith(alg: string, test: (cs: CubeState, a: Analysis) => SpecialCheck): SpecialCheck {
   if (!alg.trim()) return { ok: false, message: '手順が空です' };

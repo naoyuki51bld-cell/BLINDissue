@@ -20,7 +20,9 @@ import { elliottFlips, elliottParity, ELLIOTT_NAME, loadElliott } from '../data/
 import { labelOf } from '../data/labels';
 import { algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type PieceConfig, type Status } from '../data/store';
 import { avgTime, formatSec } from '../data/srs';
-import { Modal, StatusBadge } from './shared';
+import { Modal, StatusBadge, usePersisted } from './shared';
+import { algOfPlayer, blddbCategoryFor, playersOf, useBlddb } from '../data/blddbLoader';
+import { SuggestItem, useFavoritePlayer, type SuggestEntry } from './SuggestItem';
 
 const checkCache = new Map<string, SpecialCheck>();
 export function cachedSpecialCheck(c: SpecialCase, alg: string): SpecialCheck {
@@ -101,7 +103,33 @@ export function SpecialView({ kind }: { kind: SpecialKind }) {
     return { c, key, e, main, check, ...specialTitle(c, corner, edge) };
   });
   const registered = rows.filter((r) => r.main).length;
-  const fromSheet = rows.filter((r) => !r.main && elliottFor(r.c, elliott));
+  const blddb = useBlddb(blddbCategoryFor(kind));
+  const [source, setSource] = usePersisted<'auto' | 'blddb' | 'player'>('bulk.special.source', 'auto');
+  const [player, setPlayer] = useFavoritePlayer();
+  const players = useMemo(() => playersOf(blddb.table), [blddb.table]);
+  const pickFor = (c: SpecialCase, key: string): { alg: string; from: string } | undefined => {
+    const el = elliottFor(c, elliott);
+    const top = blddb.table?.[key]?.[0]?.alg;
+    const chain: [string | undefined, string][] =
+      source === 'auto' ? [[el, 'Elliott'], [top, 'BLDDB']] : source === 'blddb' ? [[top, 'BLDDB']] : [[algOfPlayer(blddb.table, key, player), player]];
+    for (const [alg, from] of chain) if (alg) return { alg, from };
+    return undefined;
+  };
+  const fillable = rows.filter((r) => !r.main && pickFor(r.c, r.key));
+  const fill = (replace: boolean) => {
+    const target = replace ? rows : fillable;
+    const patch: Record<string, Partial<AlgEntry>> = {};
+    const counts = new Map<string, number>();
+    for (const r of target) {
+      const p = pickFor(r.c, r.key);
+      if (!p || (replace && r.main === p.alg)) continue;
+      patch[r.key] = replace ? { algs: [p.alg, ...(r.e?.algs ?? []).filter((x) => x !== p.alg)], main: 0 } : { algs: [p.alg], main: 0 };
+      counts.set(p.from, (counts.get(p.from) ?? 0) + 1);
+    }
+    if (replace && !confirm(`${Object.keys(patch).length} ケースのメイン手順を置き換えます（今の手順は候補に残します）。よろしいですか？`)) return;
+    setAlgsBulk(patch);
+    setMessage(`${Object.keys(patch).length} ケースを${replace ? '更新' : '登録'}しました（${[...counts].map(([k, v]) => `${k} ${v}`).join('・') || 'なし'}）。`);
+  };
   const groups = kind === 'ltct' ? [...new Set(cases.map((c) => (c.kind === 'ltct' ? c.target : '')))] : [];
   const visible = rows.filter((r) => group === 'all' || (r.c.kind === 'ltct' && r.c.target === group));
 
@@ -113,22 +141,41 @@ export function SpecialView({ kind }: { kind: SpecialKind }) {
           {kind !== 'flip' && <span className="muted small">（コーナーのバッファ {stickerName('corner', corner.buffer)}）</span>}
         </div>
         <p className="muted small">{KIND_HELP[kind]}</p>
-        {fromSheet.length > 0 && (
-          <div className="row wrap">
-            <button
-              className="btn small"
-              onClick={() => {
-                const patch: Record<string, Partial<AlgEntry>> = {};
-                for (const r of fromSheet) patch[r.key] = { algs: [elliottFor(r.c, elliott)!], main: 0 };
-                setAlgsBulk(patch);
-                setMessage(`${fromSheet.length} ケースに Elliott の手順を登録しました。`);
-              }}
-            >
-              未登録の {fromSheet.length} ケースに Elliott の手順を登録
+        <div className="row wrap">
+          <label className="field inline">
+            <span className="field-label">使う手順</span>
+            <select value={source} onChange={(e) => setSource(e.target.value as 'auto' | 'blddb' | 'player')}>
+              <option value="auto">おすすめ順（Elliott → BLDDB）</option>
+              <option value="blddb">BLDDB で使っている人が多い順</option>
+              <option value="player">選手を選ぶ（BLDDB）</option>
+            </select>
+          </label>
+          {source === 'player' && (
+            <label className="field inline">
+              <span className="field-label">選手</span>
+              <select value={player} onChange={(e) => setPlayer(e.target.value)}>
+                <option value="">選んでください</option>
+                {players.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}（{p.count} ケース）
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        <div className="row wrap">
+          {fillable.length > 0 && (
+            <button className="btn small" onClick={() => fill(false)}>
+              未登録の {fillable.length} ケースに登録
             </button>
-          </div>
-        )}
-        {kind === 'ltct' && <p className="muted small">LTCT の手順表は内蔵していないので、手入力してください（入力した手順は自動でチェックします）。</p>}
+          )}
+          <button className="btn small ghost" onClick={() => fill(true)}>
+            メインを置き換える（今の手順は候補に残す）
+          </button>
+        </div>
+        {blddb.status === 'loading' && <p className="muted small">BLDDB の手順を読み込んでいます…</p>}
+        {kind === 'ltct' && <p className="muted small">LTCT は Elliott の表に無いので、BLDDB の手順か手入力で登録してください（入力した手順は自動でチェックします）。</p>}
         {message && <p className="muted small">{message}</p>}
       </div>
       {kind === 'ltct' && (
@@ -215,25 +262,7 @@ function SpecialEditor({ c, elliott, onClose }: { c: SpecialCase; elliott?: stri
       onClose={save}
     >
       <p className="muted small">{sub}</p>
-      {elliott && (
-        <div className="suggest">
-          <div className="field-label">おすすめ手順</div>
-          <ul className="suggest-list">
-            <li>
-              <span className="suggest-alg">
-                <span className="source-tag">{ELLIOTT_NAME}</span>
-                {elliott}
-              </span>
-              <span className="muted small">{safeCount(elliott)} 手</span>
-              <span className="row">
-                <button className="btn small primary" disabled={algs.includes(elliott)} onClick={() => pick(elliott)}>
-                  {algs.includes(elliott) ? '追加済み' : 'メインにする'}
-                </button>
-              </span>
-            </li>
-          </ul>
-        </div>
-      )}
+      <SpecialSuggestions c={c} elliott={elliott} current={algs} onPick={(alg, asMain) => (asMain ? pick(alg) : setAlgs([...algs.filter((x) => x.trim()), alg]))} />
       <div className="field-label">登録した手順（自分で書くこともできます）</div>
       {algs.map((text, i) => {
         const r = text.trim() ? cachedSpecialCheck(c, text) : null;
@@ -303,11 +332,43 @@ function SpecialEditor({ c, elliott, onClose }: { c: SpecialCase; elliott?: stri
   );
 }
 
-function safeCount(t: string) {
+function SpecialSuggestions({
+  c,
+  elliott,
+  current,
+  onPick,
+}: {
+  c: SpecialCase;
+  elliott?: string;
+  current: string[];
+  onPick: (alg: string, asMain: boolean) => void;
+}) {
+  const blddb = useBlddb(blddbCategoryFor(c.kind));
+  const [favorite] = useFavoritePlayer();
+  const fromDb = (blddb.table?.[specialKey(c)] ?? []).slice().sort((x, y) => Number(y.users.includes(favorite)) - Number(x.users.includes(favorite)));
+  const list: SuggestEntry[] = [
+    ...(elliott ? [{ alg: elliott, moves: safeNum(elliott), source: ELLIOTT_NAME }] : []),
+    ...fromDb.slice(0, 8).map((d) => ({ alg: d.alg, moves: safeNum(d.alg), source: 'BLDDB', users: d.users, note: d.note })),
+  ];
+  if (!list.length && blddb.status !== 'loading') return null;
+  return (
+    <div className="suggest">
+      <div className="field-label">おすすめ手順</div>
+      {blddb.status === 'loading' && <p className="muted small">BLDDB の手順を読み込んでいます…（初回のみ）</p>}
+      <ul className="suggest-list">
+        {list.map((s) => (
+          <SuggestItem key={`${s.source}:${s.alg}`} s={s} added={current.includes(s.alg)} onPick={onPick} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function safeNum(t: string): number | null {
   try {
     return moveCount(t);
   } catch {
-    return '?';
+    return null;
   }
 }
 

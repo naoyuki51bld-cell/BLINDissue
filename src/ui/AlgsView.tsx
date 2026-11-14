@@ -3,6 +3,8 @@ import { PIECE_EVENTS, PIECE_LABEL, PIECE_TYPES, STICKER_IDS, stickerName, type 
 import { bothLabels, labelOf, pairReading, pairText, secondLabelOf } from '../data/labels';
 import { algKey, algReviewKey, STATUSES, STATUS_LABEL, useStore, type AlgEntry, type Status } from '../data/store';
 import { loadSuggestions, useElliottBuffers, useElliottTable } from './suggestions';
+import { algOfPlayer, blddbCategoryFor, playersOf, useBlddb } from '../data/blddbLoader';
+import { useFavoritePlayer } from './SuggestItem';
 import { avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
 import { cachedVerify, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
@@ -170,78 +172,114 @@ function PieceAlgs({ pt }: { pt: PieceType }) {
   );
 }
 
+type FillSource = 'auto' | 'blddb' | 'player' | 'generated';
+
 function BulkFill({ pt, cases }: { pt: PieceType; cases: [StickerId, StickerId][] }) {
   const cfg = useStore((s) => s.pieces[pt]);
   const algs = useStore((s) => s.algs);
   const setAlgsBulk = useStore((s) => s.setAlgsBulk);
   const elliott = useElliottTable(pt, cfg.buffer);
+  const blddb = useBlddb(blddbCategoryFor(pt, cfg.size));
+  const [source, setSource] = usePersisted<FillSource>('bulk.source', 'auto');
+  const [player, setPlayer] = useFavoritePlayer();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const players = useMemo(() => playersOf(blddb.table), [blddb.table]);
   const missing = cases.filter(([a, b]) => !algs[algKey(pt, cfg.buffer, a, b)]?.algs.length);
   const elliottCount = elliott ? cases.filter(([a, b]) => elliott[`${a}|${b}`]).length : 0;
-  const notMain = elliott
-    ? cases.filter(([a, b]) => {
-        const alg = elliott[`${a}|${b}`];
-        const e = algs[algKey(pt, cfg.buffer, a, b)];
-        return alg && (!e || e.algs[e.main] !== alg);
-      })
-    : [];
+  const dbCount = blddb.table ? cases.filter(([a, b]) => blddb.table![algKey(pt, cfg.buffer, a, b)]?.length).length : 0;
 
-  const fillMissing = async () => {
-    const src = elliott ? 'Elliott の手順表（無いケースは自動生成の候補）' : 'おすすめ手順の 1 番目';
-    if (!confirm(`手順が未登録の ${missing.length} ケースに、${src}をまとめて登録します。あとから 1 つずつ選び直せます。よろしいですか？`)) return;
+  /** 選んだ方法での手順（無ければ undefined） */
+  const pickFor = (a: StickerId, b: StickerId, generated: Record<string, { alg: string }[]>): { alg: string; from: string } | undefined => {
+    const key = algKey(pt, cfg.buffer, a, b);
+    const top = blddb.table?.[key]?.[0]?.alg;
+    const gen = generated[`${a}|${b}`]?.[0]?.alg;
+    const el = elliott?.[`${a}|${b}`];
+    const chain: [string | undefined, string][] =
+      source === 'auto'
+        ? [[el, 'Elliott'], [top, 'BLDDB'], [gen, '自動生成']]
+        : source === 'blddb'
+          ? [[top, 'BLDDB'], [gen, '自動生成']]
+          : source === 'player'
+            ? [[algOfPlayer(blddb.table, key, player), player]]
+            : [[gen, '自動生成']];
+    for (const [alg, from] of chain) if (alg) return { alg, from };
+    return undefined;
+  };
+
+  const run = async (replace: boolean) => {
+    if (source === 'player' && !player) {
+      setMessage('選手を選んでください。');
+      return;
+    }
+    const target = replace ? cases : missing;
+    const what = source === 'player' ? `${player} さんの手順` : source === 'blddb' ? 'BLDDB で使っている人が最も多い手順' : source === 'generated' ? '自動生成の手順' : 'おすすめ手順（Elliott → BLDDB → 自動生成）';
+    const msg = replace
+      ? `${what}を、登録済みのケースも含めてメインにします。今の手順は消さずに「候補」として残します。よろしいですか？`
+      : `手順が未登録の ${missing.length} ケースに、${what}を登録します。よろしいですか？`;
+    if (!confirm(msg)) return;
     setBusy(true);
-    const table = await loadSuggestions(pt, cfg.size, cfg.buffer);
+    const generated = source === 'player' ? {} : await loadSuggestions(pt, cfg.size, cfg.buffer);
     const patch: Record<string, Partial<AlgEntry>> = {};
-    let fromElliott = 0;
-    for (const [a, b] of missing) {
-      const e = elliott?.[`${a}|${b}`];
-      const top = e ?? table[`${a}|${b}`]?.[0]?.alg;
-      if (e) fromElliott++;
-      if (top) patch[algKey(pt, cfg.buffer, a, b)] = { algs: [top], main: 0 };
+    const counts = new Map<string, number>();
+    for (const [a, b] of target) {
+      const p = pickFor(a, b, generated);
+      if (!p) continue;
+      const key = algKey(pt, cfg.buffer, a, b);
+      const cur = algs[key];
+      if (replace && cur?.algs[cur.main] === p.alg) continue;
+      patch[key] = replace ? { algs: [p.alg, ...(cur?.algs ?? []).filter((x) => x !== p.alg)], main: 0 } : { algs: [p.alg], main: 0 };
+      counts.set(p.from, (counts.get(p.from) ?? 0) + 1);
     }
     setAlgsBulk(patch);
     setBusy(false);
     const n = Object.keys(patch).length;
-    setMessage(
-      `${n} ケースに登録しました${elliott ? `（Elliott ${fromElliott}・自動生成 ${n - fromElliott}）` : ''}` +
-        `${n < missing.length ? `。${missing.length - n} ケースは候補が見つからず未登録のままです` : ''}。`,
-    );
+    setMessage(`${n} ケースを${replace ? '更新' : '登録'}しました${n ? `（${[...counts].map(([k, v]) => `${k} ${v}`).join('・')}）` : ''}。`);
   };
 
-  const useElliott = () => {
-    if (!elliott) return;
-    if (!confirm(`${notMain.length} ケースのメイン手順を Elliott の手順表のものにします。今の手順は消さずに「候補」として残します。よろしいですか？`)) return;
-    const patch: Record<string, Partial<AlgEntry>> = {};
-    for (const [a, b] of notMain) {
-      const key = algKey(pt, cfg.buffer, a, b);
-      const alg = elliott[`${a}|${b}`];
-      const cur = algs[key]?.algs ?? [];
-      patch[key] = { algs: [alg, ...cur.filter((x) => x !== alg)], main: 0 };
-    }
-    setAlgsBulk(patch);
-    setMessage(`${notMain.length} ケースのメイン手順を Elliott の手順にしました。`);
-  };
-
-  if (missing.length === 0 && notMain.length === 0 && !message && !elliott) return null;
   return (
-    <div className="stack">
-      {elliott && (
-        <p className="muted small">
-          このバッファには Elliott の手順表があります（{elliottCount} ケース）。
-        </p>
-      )}
+    <div className="stack bulk">
+      <p className="muted small">
+        {elliott && `Elliott の手順表 ${elliottCount} ケース`}
+        {elliott && blddb.table && '・'}
+        {blddb.table && `BLDDB ${dbCount} ケース`}
+        {blddb.status === 'loading' && 'BLDDB を読み込み中…'}
+        {blddb.status === 'error' && 'BLDDB を読み込めませんでした'}
+        {(elliott || blddb.table) && ' の手順があります。'}
+      </p>
+      <div className="row wrap">
+        <label className="field inline">
+          <span className="field-label">使う手順</span>
+          <select value={source} onChange={(e) => setSource(e.target.value as FillSource)}>
+            <option value="auto">おすすめ順（Elliott → BLDDB → 自動生成）</option>
+            <option value="blddb">BLDDB で使っている人が多い順</option>
+            <option value="player">選手を選ぶ（BLDDB）</option>
+            <option value="generated">自動生成のみ</option>
+          </select>
+        </label>
+        {source === 'player' && (
+          <label className="field inline">
+            <span className="field-label">選手</span>
+            <select value={player} onChange={(e) => setPlayer(e.target.value)}>
+              <option value="">選んでください</option>
+              {players.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}（{p.count} ケース）
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
       <div className="row wrap">
         {missing.length > 0 && (
-          <button className="btn small" disabled={busy} onClick={fillMissing}>
-            {busy ? '計算中…' : `未登録の ${missing.length} ケースにおすすめ手順を一括登録`}
+          <button className="btn small" disabled={busy} onClick={() => run(false)}>
+            {busy ? '準備中…' : `未登録の ${missing.length} ケースに登録`}
           </button>
         )}
-        {elliott && notMain.length > 0 && (
-          <button className="btn small" onClick={useElliott}>
-            Elliott の手順をメインにする（{notMain.length} ケース）
-          </button>
-        )}
+        <button className="btn small ghost" disabled={busy} onClick={() => run(true)}>
+          メインを置き換える（今の手順は候補に残す）
+        </button>
       </div>
       {message && <span className="muted small">{message}</span>}
     </div>

@@ -7,6 +7,7 @@ import { PracticeView } from './ui/PracticeView';
 import { SchemeEditor } from './ui/SchemeEditor';
 import { usePersisted } from './ui/shared';
 import { SyncPanel } from './ui/SyncPanel';
+import { BlddbPanel } from './ui/BlddbPanel';
 import { useStore } from './data/store';
 import { initSync } from './sync/firebase';
 
@@ -56,6 +57,7 @@ export function App() {
             <SyncPanel />
             <SchemeEditor />
             <ImportPanel />
+            <BlddbPanel />
             <ExportPanel />
           </div>
         )}
