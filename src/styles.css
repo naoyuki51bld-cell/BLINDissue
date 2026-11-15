@@ -1297,3 +1297,6 @@ details summary {
 .icon-btn:disabled {
   opacity: 0.35;
 }
+.app.immersive {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}

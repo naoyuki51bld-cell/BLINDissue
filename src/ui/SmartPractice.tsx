@@ -4,7 +4,8 @@ import { useStore } from '../data/store';
 import { formatSec, type Grade } from '../data/srs';
 import { bluetoothSupport, useSmartCube } from '../smartcube/connection';
 import { AttemptTracker, COLOR_NAMES, turnToString, validFronts } from '../smartcube/tracker';
-import { GRADES, NextCard, Summary, type Card, type Result } from './PracticeView';
+import { ExitNow, GRADES, NextCard, PracticeHeader, Summary, type Card, type Result } from './PracticeView';
+import { useImmersive } from './uiState';
 import { checkSpecialState } from '../cube/special';
 
 export function smartDebug(): boolean {
@@ -98,7 +99,9 @@ export function SmartSession({
   const status = useSmartCube((s) => s.status);
   const subscribe = useSmartCube((s) => s.subscribe);
   const connect = useSmartCube((s) => s.connect);
-  const [cards, setCards] = useState(initialCards);
+  useImmersive();
+  const cards = initialCards;
+  const [stopped, setStopped] = useState(false);
   const [index, setIndex] = useState(0);
   const [phase, setPhase] = useState<Phase>('waiting');
   const [moves, setMoves] = useState<string[]>([]);
@@ -108,7 +111,7 @@ export function SmartSession({
   const [last, setLast] = useState<Last | null>(null);
   const startRef = useRef(performance.now());
   const firstMoveRef = useRef<number | null>(null);
-  const done = index >= cards.length;
+  const done = index >= cards.length || stopped;
   const card = cards[index];
 
   const tracker = useMemo(() => {
@@ -152,7 +155,6 @@ export function SmartSession({
       const recall = (firstMoveRef.current ?? at) - startRef.current;
       recordReview(card.reviewKey, 0, recall);
       setResults((r) => [...r, { card, time: recall, grade: 0 }]);
-      setCards((c) => [...c, card]);
     },
     [card, recordReview],
   );
@@ -177,7 +179,6 @@ export function SmartSession({
       setLast({ card, ok, recall, exec });
       if (ok) setIndex((i) => i + 1);
       else {
-        setCards((c) => [...c, card]);
         setPhase('failed');
       }
     },
@@ -213,31 +214,22 @@ export function SmartSession({
         e.preventDefault();
         if (phase === 'failed') next();
         else giveUp();
-      } else if (e.key === 'Escape') onExit();
+      } else if (e.key === 'Escape') setStopped(true);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, next, giveUp, onExit]);
+  }, [phase, next, giveUp]);
 
-  if (done) return <Summary results={results} slowMs={slowMs} onExit={onExit} onRetry={onRetry} />;
+  if (done) {
+    if (!results.length) return <ExitNow onExit={onExit} />;
+    return <Summary results={results} slowMs={slowMs} onExit={onExit} onRetry={onRetry} stopped={stopped} total={cards.length} />;
+  }
 
   const recallLive = firstMoveRef.current !== null ? firstMoveRef.current - startRef.current : elapsed;
   const shown = phase === 'failed';
   return (
     <div className="page practice">
-      <div className="row">
-        <button className="btn ghost" onClick={onExit}>
-          ← 終了
-        </button>
-        <span className="muted">{title}</span>
-        <span className="spacer" />
-        <span className="muted">
-          {index + 1} / {cards.length}
-        </span>
-      </div>
-      <div className="progress thin">
-        <span className="seg seg-learned" style={{ width: `${(index / cards.length) * 100}%` }} />
-      </div>
+      <PracticeHeader title={title} index={index} total={cards.length} onStop={() => setStopped(true)} />
       <NextCard card={cards[index + 1]} />
       {status !== 'connected' && !smartDebug() && (
         <p className="warn small">
@@ -295,7 +287,7 @@ export function SmartSession({
             className="btn big"
             disabled={moves.length === 0}
             onClick={() => {
-              // 数え直しは失敗として記録し、この問題は最後にもう一度出す（このまま続けて回してもよい）
+              // 数え直しは失敗として記録する（このまま続けて回してもよい）
               recordFailure(performance.now());
               tracker?.reset();
               setMoves([]);

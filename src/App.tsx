@@ -10,6 +10,7 @@ import { SyncPanel } from './ui/SyncPanel';
 import { BlddbPanel } from './ui/BlddbPanel';
 import { useStore } from './data/store';
 import { initSync } from './sync/firebase';
+import { useUi } from './ui/uiState';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'home', label: 'ホーム', icon: '⌂' },
@@ -21,6 +22,8 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 export function App() {
   const [tab, setTab] = usePersisted<Tab>('tab', 'home');
+  // 練習中はメニューを隠す（下のタブの誤タップを防ぐ）
+  const immersive = useUi((s) => s.immersive > 0);
 
   useEffect(() => {
     // ブラウザがデータを勝手に消さないようにお願いする（対応ブラウザのみ）
@@ -36,16 +39,18 @@ export function App() {
   }, [tab]);
 
   return (
-    <div className="app">
+    <div className={immersive ? 'app immersive' : 'app'}>
       <header className="topbar">
         <h1>BLD Trainer</h1>
-        <nav className="tabs-top" aria-label="メニュー">
+        {!immersive && (
+<nav className="tabs-top" aria-label="メニュー">
           {TABS.map((t) => (
             <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
               {t.label}
             </button>
           ))}
         </nav>
+)}
       </header>
       <main>
         {tab === 'home' && <HomeView go={setTab} />}
@@ -62,7 +67,8 @@ export function App() {
           </div>
         )}
       </main>
-      <nav className="tabs-bottom" aria-label="メニュー">
+      {!immersive && (
+<nav className="tabs-bottom" aria-label="メニュー">
         {TABS.map((t) => (
           <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
             <span className="tab-icon" aria-hidden>
@@ -72,6 +78,7 @@ export function App() {
           </button>
         ))}
       </nav>
+)}
     </div>
   );
 }

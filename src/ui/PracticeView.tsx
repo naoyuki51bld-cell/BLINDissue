@@ -6,6 +6,7 @@ import { avgTime, formatSec, isDue, isNew, type Grade, type ReviewState } from '
 import { PieceTabs, usePersisted, useTargets } from './shared';
 import { SmartCubePanel, SmartSession, smartDebug } from './SmartPractice';
 import { useSmartCube } from '../smartcube/connection';
+import { useImmersive } from './uiState';
 import { bufferOrder, bufferRank, earlierBuffers } from '../data/buffers';
 import { SPECIAL_LABEL, specialKey, type SpecialCase, type SpecialKind } from '../cube/special';
 import { specialCasesFor, specialTitle } from './SpecialView';
@@ -325,16 +326,18 @@ function Session({
   onRetry: (cards: Card[]) => void;
 }) {
   const recordReview = useStore((s) => s.recordReview);
-  // 「もう一度」を付けたカードは最後にもう一度出す
-  const [cards, setCards] = useState(initialCards);
+  useImmersive();
+  const cards = initialCards;
   const [index, setIndex] = useState(0);
+  // 途中でやめたとき
+  const [stopped, setStopped] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [results, setResults] = useState<Result[]>([]);
   const startRef = useRef(performance.now());
   const timeRef = useRef(0);
   const card = cards[index];
-  const done = index >= cards.length;
+  const done = index >= cards.length || stopped;
 
   useEffect(() => {
     startRef.current = performance.now();
@@ -359,7 +362,6 @@ function Session({
       if (!revealed || done) return;
       recordReview(card.reviewKey, g, timeRef.current);
       setResults((r) => [...r, { card, time: timeRef.current, grade: g }]);
-      if (g === 0) setCards((c) => [...c, card]);
       setRevealed(false);
       setIndex((i) => i + 1);
     },
@@ -374,30 +376,23 @@ function Session({
         if (!revealed) reveal();
         else grade(2);
       } else if (revealed && ['1', '2', '3', '4'].includes(e.key)) grade((Number(e.key) - 1) as Grade);
-      else if (e.key === 'Escape') onExit();
+      else if (e.key === 'Escape') setStopped(true);
     };
+    if (done) return;
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [revealed, reveal, grade, onExit]);
+  }, [revealed, reveal, grade, done]);
 
-  if (done) return <Summary results={results} slowMs={slowMs} onExit={onExit} onRetry={onRetry} />;
+  if (done) {
+    // 1 問も答えずにやめたときはそのまま戻る
+    if (!results.length) return <ExitNow onExit={onExit} />;
+    return <Summary results={results} slowMs={slowMs} onExit={onExit} onRetry={onRetry} stopped={stopped} total={cards.length} />;
+  }
 
   const slow = elapsed > slowMs;
   return (
     <div className="page practice">
-      <div className="row">
-        <button className="btn ghost" onClick={onExit}>
-          ← 終了
-        </button>
-        <span className="muted">{title}</span>
-        <span className="spacer" />
-        <span className="muted">
-          {index + 1} / {cards.length}
-        </span>
-      </div>
-      <div className="progress thin">
-        <span className="seg seg-learned" style={{ width: `${(index / cards.length) * 100}%` }} />
-      </div>
+      <PracticeHeader title={title} index={index} total={cards.length} onStop={() => setStopped(true)} />
       <NextCard card={cards[index + 1]} />
       <button className="flashcard" onClick={revealed ? undefined : reveal} aria-live="polite">
         <span className="prompt">{card.prompt}</span>
@@ -437,14 +432,61 @@ function Session({
 
 const avgOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
-export function Summary({ results, slowMs, onExit, onRetry }: { results: Result[]; slowMs: number; onExit: () => void; onRetry: (cards: Card[]) => void }) {
+export function ExitNow({ onExit }: { onExit: () => void }) {
+  useEffect(() => onExit(), [onExit]);
+  return null;
+}
+
+/** 練習中の上部（やめるボタン・進み具合） */
+export function PracticeHeader({ title, index, total, onStop }: { title: string; index: number; total: number; onStop: () => void }) {
+  return (
+    <>
+      <div className="row">
+        <button className="btn ghost" onClick={onStop}>
+          ■ やめる
+        </button>
+        <span className="muted">{title}</span>
+        <span className="spacer" />
+        <span className="muted">
+          {Math.min(index + 1, total)} / {total}
+        </span>
+      </div>
+      <div className="progress thin">
+        <span className="seg seg-learned" style={{ width: `${(index / total) * 100}%` }} />
+      </div>
+    </>
+  );
+}
+
+const uniqueCards = (list: Result[]) => [...new Map(list.map((r) => [r.card.reviewKey, r.card])).values()];
+
+export function Summary({
+  results,
+  slowMs,
+  onExit,
+  onRetry,
+  stopped,
+  total,
+}: {
+  results: Result[];
+  slowMs: number;
+  onExit: () => void;
+  onRetry: (cards: Card[]) => void;
+  stopped?: boolean;
+  total?: number;
+}) {
+  useImmersive();
   const avg = results.length ? results.reduce((a, r) => a + r.time, 0) / results.length : null;
-  const weak = [...new Map(results.filter((r) => r.grade <= 1 || r.time > slowMs).map((r) => [r.card.reviewKey, r])).values()];
+  // 失敗: 「もう一度」「難しい」を付けた（スマートキューブでは間違えた・数え直した）問題
+  const failed = uniqueCards(results.filter((r) => r.grade <= 1));
+  // 時間がかかった: 想起時間が「遅いとみなす時間」より長かった問題
+  const slow = uniqueCards(results.filter((r) => r.time > slowMs));
+  const weak = uniqueCards(results.filter((r) => r.grade <= 1 || r.time > slowMs));
   const sorted = results.slice().sort((a, b) => b.time - a.time);
   return (
     <div className="page">
       <section className="card stack">
-        <h2>練習結果</h2>
+        <h2>練習結果{stopped && total ? <span className="muted small">（途中でやめました: {results.length} / {total} 問）</span> : null}</h2>
         <div className="stats">
           <div>
             <strong>{results.length}</strong>
@@ -465,14 +507,24 @@ export function Summary({ results, slowMs, onExit, onRetry }: { results: Result[
             <span>もう一度</span>
           </div>
           <div>
-            <strong>{weak.length}</strong>
-            <span>苦手</span>
+            <strong>{slow.length}</strong>
+            <span>時間がかかった</span>
           </div>
         </div>
-        <div className="row wrap">
-          {weak.length > 0 && (
-            <button className="btn primary" onClick={() => onRetry(weak.map((w) => w.card))}>
-              苦手だった {weak.length} 問をもう一度
+        <div className="stack">
+          {failed.length > 0 && (
+            <button className="btn primary" onClick={() => onRetry(failed)}>
+              失敗した {failed.length} 問を復習
+            </button>
+          )}
+          {slow.length > 0 && (
+            <button className="btn primary" onClick={() => onRetry(slow)}>
+              時間がかかった {slow.length} 問を復習（{formatSec(slowMs)} 秒より遅い）
+            </button>
+          )}
+          {failed.length > 0 && slow.length > 0 && weak.length > Math.max(failed.length, slow.length) && (
+            <button className="btn" onClick={() => onRetry(weak)}>
+              両方まとめて {weak.length} 問を復習
             </button>
           )}
           <button className="btn" onClick={onExit}>
