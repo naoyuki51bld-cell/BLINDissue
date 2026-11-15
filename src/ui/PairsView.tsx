@@ -34,7 +34,7 @@ export function PairsView() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [view, setView] = usePersisted<'list' | 'grid'>('pairs.view', 'list');
-  const opts = useTableOptions();
+  const opts = useTableOptions(false);
   const cfg = useStore((s) => s.pieces[pt]);
   const pairs = useStore((s) => s.pairs);
   const reviews = useStore((s) => s.reviews);

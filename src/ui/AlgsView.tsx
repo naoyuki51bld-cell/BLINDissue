@@ -8,12 +8,12 @@ import type { BlddbTable } from '../data/blddb';
 import { useFavoritePlayer } from './SuggestItem';
 import { BufferOrderEditor } from './BufferOrder';
 import { bufferOrder } from '../data/buffers';
-import { avgTime, formatSec } from '../data/srs';
+import { avgExecTime, avgTime, formatSec } from '../data/srs';
 import { AlgEditor } from './AlgEditor';
 import { cachedVerify, StatusBadge, useCases, usePersisted, useTargets, VerifyBadge } from './shared';
 import { SpecialView } from './SpecialView';
 import { SPECIAL_LABEL, type SpecialKind } from '../cube/special';
-import { PairTable, TableLegend, TableOptions, timeTone, useTableOptions } from './PairTable';
+import { PairTable, TableLegend, TableOptions, toneFor, useTableOptions } from './PairTable';
 
 type Filter = 'all' | 'missing' | 'ng' | Status;
 
@@ -146,6 +146,7 @@ function PieceAlgs({ pt }: { pt: PieceType }) {
           {visible.map((r) => {
             const reading = pairReading(cfg, r.pair);
             const t = avgTime(reviews[algReviewKey(r.key)]);
+            const x = avgExecTime(reviews[algReviewKey(r.key)]);
             return (
               <li key={r.key}>
                 <button className="case-row" onClick={() => setEditing([r.a, r.b])}>
@@ -157,7 +158,11 @@ function PieceAlgs({ pt }: { pt: PieceType }) {
                   <span className="case-meta">
                     <VerifyBadge result={r.verify} />
                     {r.entry && r.entry.algs.length > 1 && <span className="muted small">+{r.entry.algs.length - 1}</span>}
-                    {t !== null && <span className="muted small">{formatSec(t)}s</span>}
+                    {t !== null && (
+                      <span className="muted small" title={x !== null ? '想起 / 実行（スマートキューブ）' : '想起時間'}>
+                        {formatSec(t)}s{x !== null && ` / 実${formatSec(x)}s`}
+                      </span>
+                    )}
                     <StatusBadge status={r.entry?.status ?? 'none'} />
                   </span>
                 </button>
@@ -364,17 +369,18 @@ function AlgGrid({
           const r = map.get(`${a}|${b}`);
           if (!r) return null;
           const rv = reviews[algReviewKey(r.key)];
-          const tone = opts.color === 'time' ? (r.main ? timeTone(rv, opts.slowSec) : 'none') : r.entry?.status ?? 'none';
+          const tone = toneFor(opts, rv, r.entry?.status ?? 'none', !!r.main);
           const t = avgTime(rv);
+          const x = avgExecTime(rv);
           return {
             text: r.main,
             tone,
             bad: !!r.verify && r.verify.kind !== 'ok',
-            title: `${pairText(pt, cfg, a, b)}: ${r.main || '未登録'}${t !== null ? `（平均 ${formatSec(t)} 秒）` : ''}`,
+            title: `${pairText(pt, cfg, a, b)}: ${r.main || '未登録'}${t !== null ? `（想起 ${formatSec(t)} 秒${x !== null ? `・実行 ${formatSec(x)} 秒` : ''}）` : ''}`,
           };
         }}
       />
-      <TableLegend mode={opts.color} slowSec={opts.slowSec} />
+      <TableLegend mode={opts.color} slowSec={opts.slowSec} execSlowSec={opts.execSlowSec} />
     </div>
   );
 }

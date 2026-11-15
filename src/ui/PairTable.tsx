@@ -1,11 +1,11 @@
 // 行 = 1 文字目、列 = 2 文字目 の表（手順・レターペア共通）
 import type { ReactNode } from 'react';
 import type { Status } from '../data/store';
-import { avgTime, type ReviewState } from '../data/srs';
+import { avgExecTime, avgTime, type ReviewState } from '../data/srs';
 import { usePersisted } from './shared';
 
 export type Tone = Status | 'fast' | 'mid' | 'slow' | 'untested';
-export type ColorMode = 'status' | 'time';
+export type ColorMode = 'status' | 'time' | 'exec';
 
 export interface Cell {
   text: string;
@@ -23,11 +23,29 @@ export function timeTone(r: ReviewState | undefined, slowSec: number): Tone {
   return 'slow';
 }
 
-export function useTableOptions() {
-  const [color, setColor] = usePersisted<ColorMode>('table.color', 'time');
+/** 実行時間で色分け（スマートキューブ練習で記録した時間） */
+export function execTone(r: ReviewState | undefined, slowSec: number): Tone {
+  const t = avgExecTime(r);
+  if (t === null) return 'untested';
+  if (t <= (slowSec * 1000) / 2) return 'fast';
+  if (t <= slowSec * 1000) return 'mid';
+  return 'slow';
+}
+
+export function useTableOptions(allowExec = true) {
+  const [stored, setColor] = usePersisted<ColorMode>('table.color', 'time');
+  const color: ColorMode = !allowExec && stored === 'exec' ? 'time' : stored;
   const [showText, setShowText] = usePersisted<boolean>('table.text', true);
   const [slowSec] = usePersisted<number>('practice.slow', 2);
-  return { color, setColor, showText, setShowText, slowSec };
+  const [execSlowSec, setExecSlowSec] = usePersisted<number>('table.execSlow', 2);
+  return { color, setColor, showText, setShowText, slowSec, execSlowSec, setExecSlowSec, allowExec };
+}
+
+/** 色分けに使う区分（想起・実行・ステータス） */
+export function toneFor(opts: ReturnType<typeof useTableOptions>, r: ReviewState | undefined, status: Status, registered: boolean): Tone {
+  if (opts.color === 'status') return status;
+  if (!registered) return 'none';
+  return opts.color === 'exec' ? execTone(r, opts.execSlowSec) : timeTone(r, opts.slowSec);
 }
 
 export function TableOptions({ opts }: { opts: ReturnType<typeof useTableOptions> }) {
@@ -35,12 +53,29 @@ export function TableOptions({ opts }: { opts: ReturnType<typeof useTableOptions
     <div className="row wrap">
       <div className="segmented">
         <button className={opts.color === 'time' ? 'active' : ''} onClick={() => opts.setColor('time')}>
-          想起時間で色分け
+          想起時間
         </button>
+        {opts.allowExec && (
+          <button className={opts.color === 'exec' ? 'active' : ''} onClick={() => opts.setColor('exec')}>
+            実行時間
+          </button>
+        )}
         <button className={opts.color === 'status' ? 'active' : ''} onClick={() => opts.setColor('status')}>
-          ステータスで色分け
+          ステータス
         </button>
       </div>
+      {opts.color === 'exec' && (
+        <label className="field inline">
+          <span className="field-label">実行が遅いとみなす時間</span>
+          <select value={opts.execSlowSec} onChange={(e) => opts.setExecSlowSec(Number(e.target.value))}>
+            {[1, 1.5, 2, 2.5, 3, 4, 5].map((n) => (
+              <option key={n} value={n}>
+                {n} 秒
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="check">
         <input type="checkbox" checked={opts.showText} onChange={(e) => opts.setShowText(e.target.checked)} />
         セルに中身を表示
@@ -49,14 +84,15 @@ export function TableOptions({ opts }: { opts: ReturnType<typeof useTableOptions
   );
 }
 
-export function TableLegend({ mode, slowSec }: { mode: ColorMode; slowSec: number }) {
+export function TableLegend({ mode, slowSec, execSlowSec = 2 }: { mode: ColorMode; slowSec: number; execSlowSec?: number }) {
+  const sec = mode === 'exec' ? execSlowSec : slowSec;
   const items: [Tone, string][] =
-    mode === 'time'
+    mode !== 'status'
       ? [
-          ['fast', `速い（${slowSec / 2} 秒以内）`],
-          ['mid', `普通（${slowSec} 秒以内）`],
-          ['slow', `遅い（${slowSec} 秒より遅い）`],
-          ['untested', '未練習'],
+          ['fast', `速い（${sec / 2} 秒以内）`],
+          ['mid', `普通（${sec} 秒以内）`],
+          ['slow', `遅い（${sec} 秒より遅い）`],
+          ['untested', mode === 'exec' ? '実行の記録なし（スマートキューブ練習で記録）' : '未練習'],
         ]
       : [
           ['none', '未着手'],
@@ -71,7 +107,8 @@ export function TableLegend({ mode, slowSec }: { mode: ColorMode; slowSec: numbe
           <span className={`swatch tone-${t}`} /> {l}
         </span>
       ))}
-      <span className="legend-item">「遅いとみなす秒数」は練習画面で変えられます</span>
+      {mode === 'time' && <span className="legend-item">想起の「遅いとみなす秒数」は練習画面で変えられます</span>}
+      {mode === 'exec' && <span className="legend-item">実行時間はスマートキューブ練習の記録（直近 5 回の平均）です</span>}
     </p>
   );
 }

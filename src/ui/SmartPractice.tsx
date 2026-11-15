@@ -78,6 +78,7 @@ interface Last {
   ok: boolean;
   recall: number;
   exec?: number;
+  note?: string;
 }
 
 export function SmartSession({
@@ -138,9 +139,35 @@ export function SmartSession({
     return () => clearInterval(id);
   }, [done, phase]);
 
+  // 「数え直す」などで、この問題をすでに失敗として記録したか
+  const failedRef = useRef(false);
+  useEffect(() => {
+    failedRef.current = false;
+  }, [index]);
+
+  const recordFailure = useCallback(
+    (at: number) => {
+      if (!card || failedRef.current) return;
+      failedRef.current = true;
+      const recall = (firstMoveRef.current ?? at) - startRef.current;
+      recordReview(card.reviewKey, 0, recall);
+      setResults((r) => [...r, { card, time: recall, grade: 0 }]);
+      setCards((c) => [...c, card]);
+    },
+    [card, recordReview],
+  );
+
   const finish = useCallback(
     (ok: boolean, at: number) => {
       if (!card) return;
+      if (failedRef.current) {
+        // すでに失敗として記録済み: 二重に記録しない
+        if (ok) {
+          setLast({ card, ok: false, recall: (firstMoveRef.current ?? at) - startRef.current, note: '数え直したので失敗として記録' });
+          setIndex((i) => i + 1);
+        } else setPhase('failed');
+        return;
+      }
       const first = firstMoveRef.current;
       const recall = (first ?? at) - startRef.current;
       const exec = ok && first !== null ? at - first : undefined;
@@ -223,6 +250,7 @@ export function SmartSession({
       {last && !shown && (
         <p className={last.ok ? 'last-result ok' : 'last-result ng'}>
           {last.ok ? '✓' : '✗'} {last.card.prompt}　想起 {formatSec(last.recall)}s{last.exec !== undefined && `　実行 ${formatSec(last.exec)}s`}
+          {last.note && `（${last.note}）`}
         </p>
       )}
       <div className="flashcard smart" aria-live="polite">
@@ -267,13 +295,15 @@ export function SmartSession({
             className="btn big"
             disabled={moves.length === 0}
             onClick={() => {
+              // 数え直しは失敗として記録し、この問題は最後にもう一度出す（このまま続けて回してもよい）
+              recordFailure(performance.now());
               tracker?.reset();
               setMoves([]);
               setDiverged(null);
             }}
-            title="回した分を手で戻したときなど、ここから数え直します"
+            title="回した分を手で戻したときなど、ここから数え直します（失敗として記録します）"
           >
-            数え直す
+            数え直す（失敗扱い）
           </button>
           <button className="btn big grow" onClick={giveUp}>
             わからない／間違えた
