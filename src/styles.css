@@ -1457,3 +1457,19 @@ details summary {
 .tabs-bottom button {
   font-size: 0.66rem;
 }
+.sc.next.half {
+  background: linear-gradient(90deg, var(--accent) 50%, var(--accent-soft) 50%);
+}
+.cube-sync {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+.mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.ok-text {
+  color: var(--ok);
+}
+.ng-text {
+  color: var(--danger);
+}

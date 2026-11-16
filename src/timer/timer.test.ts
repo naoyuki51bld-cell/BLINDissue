@@ -3,7 +3,7 @@ import { applyMoves, colors, solved } from '../cube/cube';
 import { toBaseMoves } from '../cube/notation';
 import { toFaceTurns, turnToString } from '../smartcube/tracker';
 import { segmentSolve } from './analysis';
-import { applyAlgColors, colorsToState, describeUnsolved, fromFacelets, isSolvedColors, solvedColors } from './cubeColors';
+import { applyAlgColors, colorsToState, describeUnsolved, fromFacelets, fromGrip, isSolvedColors, solvedColors, toGrip } from './cubeColors';
 import { randomScramble } from './scramble';
 import { averageOf, bestOf, formatTime, meanOf, successRate, value } from './stats';
 import type { Solve } from './types';
@@ -56,5 +56,42 @@ describe('timer', () => {
     expect(segs.map((s) => s.kind)).toEqual(['corner', 'edge', 'parity']);
     expect(segs[1].pause).toBe(600); // 0.1 + 0.5 秒
     expect(segs[0].moves).toBe(toFaceTurns(algs[0]).map(turnToString).join(' '));
+  });
+  it('converts between core and grip frames', () => {
+    const c = applyAlgColors(solvedColors(), "R U F' D2 L B'");
+    for (const grip of [{ top: 'D', front: 'F' }, { top: 'U', front: 'R' }, { top: 'F', front: 'D' }] as const) {
+      expect(Array.from(fromGrip(toGrip(c, grip), grip))).toEqual(Array.from(c));
+    }
+  });
+});
+
+import { isDone, parseScramble, startProgress, stepProgress } from './scrambleTracker';
+import { parseFaceTurn } from '../smartcube/tracker';
+
+describe('scramble tracking by moves', () => {
+  const run = (scr: string, moves: string) => {
+    const tokens = parseScramble(scr);
+    let p = startProgress();
+    for (const m of moves.split(' ').filter(Boolean)) p = stepProgress(p, tokens, parseFaceTurn(m)!);
+    return { p, tokens };
+  };
+  it('follows the scramble, R2 as two quarter turns in either direction', () => {
+    const { p, tokens } = run("R2 U F'", "R R U F'");
+    expect(isDone(p, tokens)).toBe(true);
+    expect(isDone(run("R2 U F'", "R' R' U F'").p, tokens)).toBe(true);
+  });
+  it('reports wrong moves and recovers after undoing them', () => {
+    const { p } = run("R2 U F'", 'R R U L');
+    expect(p.pos).toBe(2);
+    expect(p.off).toEqual([{ face: 'L', amount: 1 }]);
+    const { p: p2, tokens } = run("R2 U F'", "R R U L L' F'");
+    expect(isDone(p2, tokens)).toBe(true);
+  });
+  it('a half-finished R2 followed by another face is off', () => {
+    const { p } = run("R2 U", 'R U');
+    expect(p.off).toEqual([
+      { face: 'R', amount: 1 },
+      { face: 'U', amount: 1 },
+    ]);
   });
 });

@@ -1,7 +1,7 @@
 // スマートキューブから届く回転（芯から見た外側の面の回転）を、練習の判定に使う形にする。
 // スマートキューブは「センター（芯）を固定した座標」で U R F D L B の回転だけを報告する。
 // M やワイドムーブは、反対側の面の回転 + 持ち替えとして届く。
-import { applyMoves, FACES, rotateVec, solved, wholeCubeRotations, type Axis, type CubeState, type Face, type Vec3 } from '../cube/cube';
+import { applyMoves, FACE_NORMAL, FACES, rotateVec, solved, wholeCubeRotations, type Axis, type CubeState, type Face, type Vec3 } from '../cube/cube';
 import { flatten, parseAlg, tokenToBaseMove } from '../cube/notation';
 import type { PieceType, StickerId } from '../cube/pieces';
 import { verifyState } from '../cube/verify';
@@ -203,4 +203,19 @@ export class AttemptTracker {
 
 export function turnToString(t: FaceTurn): string {
   return t.face + (t.amount === 2 || t.amount === -2 ? '2' : t.amount === -1 ? "'" : '');
+}
+
+/**
+ * 持ち方の自動判定: 持ったまま「R」と「U」を回してもらい、
+ * キューブが報告した面（キューブ本来の面名）から、上と前の色を決める。
+ */
+export function gripFromTurns(coreR: Face, coreU: Face): Grip | null {
+  const nR = FACE_NORMAL[coreR];
+  const nU = FACE_NORMAL[coreU];
+  // R と U が直交していなければ判定できない
+  if (nR[0] * nU[0] + nR[1] * nU[1] + nR[2] * nU[2] !== 0) return null;
+  // 前 = R × U（右手系: x × y = z）
+  const f: Vec3 = [nR[1] * nU[2] - nR[2] * nU[1], nR[2] * nU[0] - nR[0] * nU[2], nR[0] * nU[1] - nR[1] * nU[0]];
+  const front = FACES.find((x) => FACE_NORMAL[x].every((v, i) => v === f[i]));
+  return front ? { top: coreU, front } : null;
 }

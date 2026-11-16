@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyMoves, solved } from '../cube/cube';
 import { invertAlgText, toBaseMoves } from '../cube/notation';
 import { detectCase } from '../cube/verify';
-import { AttemptTracker, divergence, gripMap, parseFaceTurn, toFaceTurns, turnToString } from './tracker';
+import { AttemptTracker, divergence, gripFromTurns, gripMap, parseFaceTurn, toFaceTurns, turnToString } from './tracker';
 
 const ALGS: ['corner' | 'edge', string][] = [
   ['corner', "[R U R', D]"],
@@ -71,5 +71,15 @@ describe('smart cube tracker', () => {
     expect(m.U).toBe('D');
     expect(m.R).toBe('L');
     expect(m.F).toBe('F');
+  });
+  it('detects the grip from an R turn and a U turn', () => {
+    expect(gripFromTurns('R', 'U')).toEqual({ top: 'U', front: 'F' });
+    // 黄色上・緑前（z2）: 持ち方の R はキューブ本来の L、U は D
+    expect(gripFromTurns('L', 'D')).toEqual({ top: 'D', front: 'F' });
+    // 白上・赤前（y'）で持つと、持ち方の R は B
+    const g = gripFromTurns('B', 'U')!;
+    expect(g.top).toBe('U');
+    expect(gripMap(g).B).toBe('R');
+    expect(gripFromTurns('R', 'L')).toBeNull();
   });
 });

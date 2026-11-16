@@ -3,7 +3,9 @@ import { FACES, type Face } from '../cube/cube';
 import { useStore } from '../data/store';
 import { formatSec, type Grade } from '../data/srs';
 import { bluetoothSupport, useSmartCube } from '../smartcube/connection';
-import { AttemptTracker, COLOR_NAMES, turnToString, validFronts } from '../smartcube/tracker';
+import { AttemptTracker, COLOR_NAMES, gripFromTurns, turnToString, validFronts } from '../smartcube/tracker';
+import { isSolvedColors, toGrip } from '../timer/cubeColors';
+import { CubeNet } from './CubeNet';
 import { ExitNow, GRADES, NextCard, PracticeHeader, Summary, type Card, type Result } from './PracticeView';
 import { useImmersive } from './uiState';
 import { checkSpecialState } from '../cube/special';
@@ -65,9 +67,105 @@ export function SmartCubePanel() {
           </select>
         </label>
       </div>
+      {(status === 'connected' || smartDebug()) && <CubeSyncTools />}
       <p className="muted small">
         手順を回し始めるときの持ち方に合わせてください。キューブは揃っていなくても大丈夫です（出題してからの変化だけで判定します）。対応機種: GAN356 i Carry / i Carry S / i Carry 2、GAN12 ui、GAN356 i3 などの GAN 製スマートキューブ。
       </p>
+    </div>
+  );
+}
+
+/**
+ * スマートキューブとアプリのずれを直す道具:
+ * 「揃えた」でキューブ内部の状態もリセット、持ち方の自動合わせ、回した手と認識している状態の表示
+ */
+export function CubeSyncTools() {
+  const { colors, grip, setGrip, resetSolved, requestState, subscribe } = useSmartCube();
+  const [recent, setRecent] = useState<{ raw: string; shown: string }[]>([]);
+  const [calib, setCalibState] = useState<null | { step: 'R' | 'U'; r?: Face }>(null);
+  const calibRef = useRef(calib);
+  const setCalib = (c: typeof calib) => {
+    calibRef.current = c;
+    setCalibState(c);
+  };
+  const [message, setMessage] = useState('');
+
+  useEffect(
+    () =>
+      subscribe((e) => {
+        setRecent((r) => [...r, { raw: e.raw, shown: turnToString(e.turn) }].slice(-14));
+        const c = calibRef.current;
+        if (!c) return;
+        const face = e.raw[0] as Face;
+        if (c.step === 'R') {
+          setCalib({ step: 'U', r: face });
+          return;
+        }
+        const g = gripFromTurns(c.r!, face);
+        if (g) {
+          setGrip(g);
+          setMessage(`持ち方を「上: ${COLOR_NAMES[g.top]}・前: ${COLOR_NAMES[g.front]}」にしました。今回した U と R を戻してください（U' R'）。`);
+        } else setMessage('判定できませんでした。持ったまま、右の面（R）→ 上の面（U）の順に 1 回ずつ回してください。');
+        setCalib(null);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [subscribe, setGrip],
+  );
+
+  const view = colors ? toGrip(colors, grip) : null;
+  const solvedNow = view ? isSolvedColors(view) : null;
+
+  return (
+    <div className="stack cube-sync">
+      <div className="row wrap">
+        <button
+          className="btn small primary"
+          onClick={async () => {
+            await resetSolved();
+            setRecent([]);
+            setMessage('キューブを揃った状態としてリセットしました。');
+          }}
+        >
+          揃えた（状態をリセット）
+        </button>
+        <button
+          className="btn small"
+          onClick={() => {
+            setCalib({ step: 'R' });
+            setMessage('');
+          }}
+        >
+          持ち方を自動で合わせる
+        </button>
+        <button className="btn small ghost" onClick={() => requestState()}>
+          状態を読み直す
+        </button>
+      </div>
+      {calib && (
+        <p className="notice small">
+          いつもの持ち方のまま、{calib.step === 'R' ? <b>右の面を時計回りに 1 回（R）</b> : <b>次に上の面を時計回りに 1 回（U）</b>}回してください。
+        </p>
+      )}
+      {message && <p className="muted small">{message}</p>}
+      <details>
+        <summary className="muted small">
+          動作確認（回した手とアプリが認識している状態）
+          {solvedNow !== null && <b className={solvedNow ? 'ok-text' : 'ng-text'}>　{solvedNow ? '揃っていると認識' : '崩れていると認識'}</b>}
+        </summary>
+        <div className="stack">
+          <p className="small">
+            回した手（持ち方で表示）:{' '}
+            <span className="mono">{recent.length ? recent.map((r) => r.shown).join(' ') : '（まだありません）'}</span>
+          </p>
+          <p className="muted small">
+            キューブが報告した面: <span className="mono">{recent.map((r) => r.raw).join(' ')}</span>
+          </p>
+          {view ? <CubeNet n={3} colorOf={view} maxWidth={240} /> : <p className="muted small">状態が分かりません。揃えてから「揃えた」を押してください。</p>}
+          <p className="muted small">
+            表示が実物と違うとき: 回した面の名前が違う → 「持ち方を自動で合わせる」。展開図が実物と違う → 揃えてから「揃えた」。
+          </p>
+        </div>
+      </details>
     </div>
   );
 }

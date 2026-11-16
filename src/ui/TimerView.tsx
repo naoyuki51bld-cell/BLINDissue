@@ -7,8 +7,9 @@ import { useSmartCube } from '../smartcube/connection';
 import type { FaceTurn } from '../smartcube/tracker';
 import { turnToString } from '../smartcube/tracker';
 import { segmentSolve } from '../timer/analysis';
-import { applyAlgColors, describeUnsolved, isSolvedColors, sameColors, solvedColors, toGrip, type Colors } from '../timer/cubeColors';
+import { applyAlgColors, describeUnsolved, fromGrip, isSolvedColors, sameColors, solvedColors, toGrip, type Colors } from '../timer/cubeColors';
 import { randomScramble } from '../timer/scramble';
+import { isDone, parseScramble, startProgress, stepProgress, type ScrambleProgress } from '../timer/scrambleTracker';
 import { averageOf, bestOf, bestSingle, current, formatTime, meanOf, successRate, value } from '../timer/stats';
 import type { Penalty, Solve } from '../timer/types';
 import { CubeNet } from './CubeNet';
@@ -95,14 +96,19 @@ export function TimerView() {
       let dnfReason: string | undefined;
       let segments: Solve['segments'];
       if (cubeOn) {
-        // 止めたときはキューブに状態を問い合わせて確かめる（手の取りこぼし対策）
-        const core = manual ? await useSmartCube.getState().requestState() : useSmartCube.getState().colors;
-        if (core) {
-          const c = toGrip(core, useSmartCube.getState().grip);
-          if (!isSolvedColors(c)) {
-            penalty = 'DNF';
-            dnfReason = describeUnsolved(c);
-          }
+        // アプリが追っている状態とキューブが報告する状態のどちらかで揃っていれば成功（片方のずれで誤って DNF にしない）
+        const st = useSmartCube.getState();
+        const local = st.colors;
+        let ok = !!local && isSolvedColors(local);
+        let unsolved = local && !ok ? local : null;
+        if (!ok && manual) {
+          const reported = await st.requestState();
+          if (reported && isSolvedColors(reported)) ok = true;
+          else if (reported) unsolved = unsolved ?? reported;
+        }
+        if (!ok && unsolved) {
+          penalty = 'DNF';
+          dnfReason = describeUnsolved(toGrip(unsolved, st.grip));
         }
         const memoEnd = memoEndRef.current ?? total;
         if (turnsRef.current.length)
@@ -320,16 +326,6 @@ export function TimerView() {
                 スマートキューブなしのとき、1 回目のタップで記憶時間を区切る
               </label>
               {useCube && <SmartCubePanel />}
-              {useCube && cube.status === 'connected' && (
-                <div className="row wrap">
-                  <button className="btn small" onClick={() => cube.requestState()}>
-                    キューブの状態を読み直す
-                  </button>
-                  <button className="btn small ghost" onClick={() => cube.assumeSolved()}>
-                    今の状態を「揃っている」にする
-                  </button>
-                </div>
-              )}
             </div>
           </details>
         </>
@@ -365,62 +361,55 @@ function ScramblePanel({
     return out;
   }, [scramble]);
   const cube = useSmartCube();
-  const [off, setOff] = useState<FaceTurn[]>([]);
-  const [progress, setProgress] = useState<number | null>(null);
+  const turnsList = useMemo(() => parseScramble(scramble), [scramble]);
+  const [prog, setProgState] = useState<ScrambleProgress>(startProgress);
+  const progRef = useRef(prog);
+  const setProg = (p: ScrambleProgress) => {
+    progRef.current = p;
+    setProgState(p);
+  };
 
-  // 回すたびに、スクランブルのどこまで進んだか・ずれた手を調べる
+  useEffect(() => setProg(startProgress()), [scramble]);
+
+  // 色の状態がスクランブルの途中と一致すれば、それを正とする（キューブの状態が正しいとき）
   useEffect(() => {
-    setOff([]);
-    setProgress(null);
-  }, [scramble]);
-  useEffect(() => {
-    if (!cubeOn || !cube.colors) {
-      setProgress(null);
-      return;
-    }
+    if (!cubeOn || !cube.colors) return;
     const c = toGrip(cube.colors, cube.grip);
     const i = prefixes.findIndex((p) => sameColors(p, c));
-    if (i >= 0) {
-      setProgress(i);
-      setOff([]);
-    }
+    if (i >= 0 && (i !== progRef.current.pos || progRef.current.off.length || progRef.current.partial)) setProg({ pos: i, partial: 0, off: [] });
   }, [cubeOn, cube.colors, cube.grip, prefixes]);
+
+  // 回した手の順番でも進める（キューブ内部の状態がずれていても反応する）
   useEffect(() => {
     if (!cubeOn) return;
     return cube.subscribe((e) => {
-      const core = useSmartCube.getState().colors;
-      if (!core) return;
-      const c = toGrip(core, useSmartCube.getState().grip);
-      if (prefixes.some((p) => sameColors(p, c))) return;
-      setOff((o) => {
-        const lastT = o[o.length - 1];
-        if (lastT && lastT.face === e.turn.face) {
-          const a = (((lastT.amount + e.turn.amount) % 4) + 4) % 4;
-          const rest = o.slice(0, -1);
-          return a === 0 ? rest : [...rest, { face: lastT.face, amount: a === 3 ? -1 : a }];
-        }
-        return [...o, e.turn];
-      });
+      const next = stepProgress(progRef.current, turnsList, e.turn);
+      setProg(next);
+      if (isDone(next, turnsList)) {
+        // 手の順番では完了したのに状態が一致しないときは、アプリ側の状態をスクランブル後に合わせる
+        const st = useSmartCube.getState();
+        const target = prefixes[prefixes.length - 1];
+        if (!st.colors || !sameColors(toGrip(st.colors, st.grip), target)) useSmartCube.setState({ colors: fromGrip(target, st.grip) });
+      }
     });
-  }, [cubeOn, cube.subscribe, prefixes]);
+  }, [cubeOn, cube.subscribe, turnsList, prefixes]);
 
-  const done = progress === tokens.length;
+  const done = isDone(prog, turnsList);
+  const off = prog.off;
   return (
     <section className="card stack scramble-card">
       <div className="scramble-text" aria-label="スクランブル">
         {tokens.map((t, i) => (
-          <span key={i} className={progress !== null && i < progress ? 'sc done' : progress === i ? 'sc next' : 'sc'}>
+          <span key={i} className={cubeOn && i < prog.pos ? 'sc done' : cubeOn && i === prog.pos ? (prog.partial ? 'sc next half' : 'sc next') : 'sc'}>
             {t}
           </span>
         ))}
       </div>
       {cubeOn && (
         <p className={done ? 'notice small' : off.length ? 'warn small' : 'muted small'}>
-          {!cube.colors && 'キューブの状態が分かりません。揃えてから下の設定の「今の状態を『揃っている』にする」を押してください。'}
-          {cube.colors && done && '✓ スクランブル完了。長押しして離すと記憶開始'}
-          {cube.colors && !done && off.length > 0 && `ずれています。戻す: ${off.slice().reverse().map(inverseTurn).map(turnToString).join(' ')}`}
-          {cube.colors && !done && !off.length && progress === null && 'キューブが揃っていないか、スクランブルと違う状態です（揃えてから回してください）'}
-          {cube.colors && !done && !off.length && progress !== null && `${progress} / ${tokens.length} 手`}
+          {done && '✓ スクランブル完了。長押しして離すと記憶開始'}
+          {!done && off.length > 0 && `ずれています。戻す: ${off.slice().reverse().map(inverseTurn).map(turnToString).join(' ')}`}
+          {!done && !off.length && `${prog.pos} / ${tokens.length} 手${prog.partial ? '（2 回転の 1 回目）' : ''}。揃った状態から回してください`}
         </p>
       )}
       <div className="row wrap">

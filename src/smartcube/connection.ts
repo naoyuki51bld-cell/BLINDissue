@@ -28,6 +28,8 @@ interface SmartCubeState {
   requestState: () => Promise<Colors | null>;
   /** 今の状態を「揃っている」として扱う（状態を取得できない機種・動作確認用） */
   assumeSolved: () => void;
+  /** キューブを揃えた状態でリセット（キューブ内部の状態も揃った状態にする） */
+  resetSolved: () => Promise<void>;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   setGrip: (g: Grip) => void;
@@ -37,7 +39,7 @@ interface SmartCubeState {
 }
 
 const listeners = new Set<Listener>();
-let connection: { disconnect: () => Promise<void>; sendCubeCommand: (c: { type: 'REQUEST_FACELETS' | 'REQUEST_BATTERY' }) => Promise<void> } | null = null;
+let connection: { disconnect: () => Promise<void>; sendCubeCommand: (c: { type: 'REQUEST_FACELETS' | 'REQUEST_BATTERY' | 'REQUEST_RESET' }) => Promise<void> } | null = null;
 let stateWaiters: ((c: Colors | null) => void)[] = [];
 
 const GRIP_KEY = 'smartcube.grip';
@@ -111,6 +113,14 @@ export const useSmartCube = create<SmartCubeState>()((set, get) => {
       return p;
     },
     assumeSolved: () => set({ colors: solvedColors() }),
+    resetSolved: async () => {
+      set({ colors: solvedColors() });
+      if (connection) {
+        await connection.sendCubeCommand({ type: 'REQUEST_RESET' }).catch(() => undefined);
+        // リセット後の状態を読み直す（揃っていれば一致する）
+        setTimeout(() => connection?.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => undefined), 400);
+      }
+    },
     setGrip: (g) => {
       set({ grip: g });
       try {

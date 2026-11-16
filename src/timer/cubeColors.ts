@@ -56,6 +56,36 @@ export function fromFacelets(f: string): Colors | null {
   return out;
 }
 
+function gripRotation(grip: Grip) {
+  for (const seq of wholeCubeRotations(3)) {
+    const s = applyMoves(solved(3), 3, seq);
+    const centerColor = (f: number) => Math.floor(s[f * 9 + 4] / 9);
+    if (FACES[centerColor(0)] === grip.top && FACES[centerColor(2)] === grip.front) return seq;
+  }
+  return [];
+}
+
+function applyBase(c: Colors, moves: ReturnType<typeof gripRotation>): Colors {
+  let out = c;
+  for (const m of moves) {
+    const to = movePermutation(3, m);
+    const next = new Uint8Array(54);
+    for (let i = 0; i < 54; i++) next[to[i]] = out[i];
+    out = next;
+  }
+  return out;
+}
+
+/** 持ち方から見た色 → キューブ本来の向きの色（toGrip の逆） */
+export function fromGrip(c: Colors, grip: Grip): Colors {
+  if (grip.top === 'U' && grip.front === 'F') return c;
+  const inv = gripRotation(grip)
+    .slice()
+    .reverse()
+    .map((m) => ({ ...m, turns: -m.turns }));
+  return applyBase(c, inv);
+}
+
 /** キューブ本来の向きの色 → 持ち方から見た色 */
 export function toGrip(c: Colors, grip: Grip): Colors {
   if (grip.top === 'U' && grip.front === 'F') return c;
