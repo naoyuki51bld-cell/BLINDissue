@@ -32,6 +32,8 @@ export interface Solve {
   segments?: Segment[];
   /** スタート時、キューブの状態がスクランブルどおりだったか（スマートキューブ使用時） */
   scrambleOk?: boolean;
+  /** スクランブルの種類（通常以外） */
+  scrambleType?: 'edges' | 'corners';
   updatedAt: number;
   /** 削除済み（同期用） */
   deleted?: boolean;

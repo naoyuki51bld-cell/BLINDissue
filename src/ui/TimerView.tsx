@@ -9,6 +9,7 @@ import { turnToString } from '../smartcube/tracker';
 import { segmentSolve } from '../timer/analysis';
 import { applyAlgColors, describeUnsolved, fromGrip, isSolvedColors, sameColors, solvedColors, toGrip, type Colors } from '../timer/cubeColors';
 import { randomScramble } from '../timer/scramble';
+import { makeScramble, SCRAMBLE_TYPES, type ScrambleType } from '../timer/scrambleGen';
 import { judgeSegments, type Verdict } from '../timer/memo';
 import { memoSettingsFrom } from '../timer/memoSettings';
 import { isDone, parseScramble, startProgress, stepProgress, type ScrambleProgress } from '../timer/scrambleTracker';
@@ -43,7 +44,26 @@ export function TimerView() {
   const [splitMemo, setSplitMemo] = usePersisted<boolean>('timer.splitMemo', true);
   const [autoStop, setAutoStop] = usePersisted<boolean>('timer.autoStop', true);
   const [useCube, setUseCube] = usePersisted<boolean>('timer.useCube', true);
-  const [scramble, setScramble] = useState(() => randomScramble());
+  const [scrType, setScrTypeState] = usePersisted<ScrambleType>('timer.scrambleType', 'normal');
+  const [scramble, setScrambleState] = useState(() => (scrType === 'normal' ? randomScramble() : ''));
+  const scrSeq = useRef(0);
+  const setScramble = (s: string) => {
+    scrSeq.current++;
+    setScrambleState(s);
+  };
+  const newScramble = (type: ScrambleType = scrType) => {
+    const id = ++scrSeq.current;
+    if (type !== 'normal') setScrambleState('');
+    makeScramble(type).then((s) => id === scrSeq.current && setScrambleState(s));
+  };
+  const setScrType = (t: ScrambleType) => {
+    setScrTypeState(t);
+    newScramble(t);
+  };
+  useEffect(() => {
+    if (!scramble) newScramble();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [phase, setPhase] = useState<Phase>('idle');
   const [now, setNow] = useState(0);
   const [last, setLast] = useState<Solve | null>(null);
@@ -137,15 +157,17 @@ export function TimerView() {
         times: timesRef.current.length ? timesRef.current.map((t) => Math.round(t)) : undefined,
         segments,
         scrambleOk: scrambleOkRef.current,
+        scrambleType: scrType !== 'normal' ? scrType : undefined,
         updatedAt: Date.now(),
       };
       addSolve(s);
       setLast(s);
       setNow(total);
-      setScramble(randomScramble());
+      newScramble();
       setPhase('idle');
     },
-    [cubeOn, pieces, session, scramble, addSolve],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cubeOn, pieces, session, scramble, addSolve, scrType],
   );
 
   const scrambleOkRef = useRef<boolean | undefined>(undefined);
@@ -203,7 +225,7 @@ export function TimerView() {
       tapWhileRunning();
       return;
     }
-    if (ph !== 'idle') return;
+    if (ph !== 'idle' || !scramble) return;
     setPhase('arming');
     armTimer.current = setTimeout(() => phaseRef.current === 'arming' && setPhase('ready'), HOLD_MS);
   };
@@ -250,8 +272,10 @@ export function TimerView() {
       {!running && (
         <ScramblePanel
           scramble={scramble}
-          onNew={() => setScramble(randomScramble())}
+          onNew={() => newScramble()}
           onSet={setScramble}
+          type={scrType}
+          setType={setScrType}
           cubeOn={cubeOn}
           showCube={showCube}
           setShowCube={setShowCube}
@@ -353,15 +377,19 @@ function ScramblePanel({
   cubeOn,
   showCube,
   setShowCube,
+  type,
+  setType,
 }: {
   scramble: string;
   onNew: () => void;
   onSet: (s: string) => void;
+  type: ScrambleType;
+  setType: (t: ScrambleType) => void;
   cubeOn: boolean;
   showCube: boolean;
   setShowCube: (v: boolean) => void;
 }) {
-  const tokens = scramble.split(' ');
+  const tokens = scramble ? scramble.split(' ') : [];
   const prefixes = useMemo(() => {
     const out: Colors[] = [solvedColors()];
     for (const t of tokens) out.push(applyAlgColors(out[out.length - 1], t));
@@ -405,14 +433,22 @@ function ScramblePanel({
   const off = prog.off;
   return (
     <section className="card stack scramble-card">
+      <div className="chips" role="radiogroup" aria-label="スクランブルの種類">
+        {SCRAMBLE_TYPES.map((t) => (
+          <button key={t.id} role="radio" aria-checked={type === t.id} className={type === t.id ? 'chip small active' : 'chip small'} onClick={() => setType(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
       <div className="scramble-text" aria-label="スクランブル">
+        {!scramble && <span className="muted">作成中…</span>}
         {tokens.map((t, i) => (
           <span key={i} className={cubeOn && i < prog.pos ? 'sc done' : cubeOn && i === prog.pos ? (prog.partial ? 'sc next half' : 'sc next') : 'sc'}>
             {t}
           </span>
         ))}
       </div>
-      {cubeOn && (
+      {cubeOn && scramble && (
         <p className={done ? 'notice small' : off.length ? 'warn small' : 'muted small'}>
           {done && '✓ スクランブル完了。長押しして離すと記憶開始'}
           {!done && off.length > 0 && `ずれています。戻す: ${off.slice().reverse().map(inverseTurn).map(turnToString).join(' ')}`}
@@ -564,7 +600,9 @@ function SolveDetail({ solve, onClose }: { solve: Solve; onClose: () => void }) 
         ))}
       </div>
       {solve.dnfReason && <p className="warn small">止めたときの状態: {solve.dnfReason}</p>}
-      <p className="scramble-small">{solve.scramble}</p>
+      <p className="scramble-small">
+        {solve.scrambleType && <span className="badge">{solve.scrambleType === 'edges' ? 'エッジのみ' : 'コーナーのみ'}</span>} {solve.scramble}
+      </p>
       {solve.scrambleOk === false && <p className="warn small">スタート時のキューブがスクランブルと違う状態でした（スクランブルの回し間違いの可能性）。下の分析は正しくないかもしれません。</p>}
       {diag && (
         <div className={firstMistake >= 0 ? 'diag-summary ng' : 'diag-summary ok'}>

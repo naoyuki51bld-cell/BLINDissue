@@ -40,8 +40,9 @@ function solveByExpected(scramble: string) {
 }
 
 describe('expected solution (memo)', () => {
-  it('solves random scrambles except for twisted corners', () => {
+  it('solves random scrambles (twisted corners too, with 3-style combos)', () => {
     let tested = 0;
+    let withTwist = 0;
     let rnd = 1;
     const rand = () => ((rnd = (rnd * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < 60 && tested < 50; i++) {
@@ -51,10 +52,13 @@ describe('expected solution (memo)', () => {
       tested++;
       const st = applyMoves(solved(3), 3, toBaseMoves(`${scr} ${r.algs.join(' ')}`, 3));
       const a = analyze(caseStateOf(st)!);
-      const bad = a.edges.some((s, j) => s.piece !== j || s.twist !== 0) || a.corners.some((s, j) => s.piece !== j);
+      const twistLeft = r.exp.steps.some((s) => s.kind === 'twist');
+      if (r.exp.steps.some((s) => s.twist)) withTwist++;
+      const bad = a.edges.some((s, j) => s.piece !== j || s.twist !== 0) || a.corners.some((s, j) => s.piece !== j || (!twistLeft && s.twist !== 0));
       expect(bad, `${scr}\n${r.exp.steps.map((s) => s.label).join(' / ')}\n${r.exp.notes.join(' ')}`).toBe(false);
     }
     expect(tested).toBeGreaterThan(30);
+    expect(withTwist).toBeGreaterThan(3);
   });
 
   it('judges a correct solve as all ok, and finds memo / execution mistakes', () => {
@@ -114,4 +118,37 @@ describe('floating buffers', () => {
     }
     expect(floated).toBeGreaterThan(0);
   });
+});
+
+describe('twisted corners with two 3-style algs', () => {
+  it('solves twist-only states with registered corner algs and judges them ok', async () => {
+    const { solve, moveName, inverseMove, solvedCubie } = await import('./solver');
+    let rnd = 5;
+    const rand = () => ((rnd = (rnd * 16807) % 2147483647) / 2147483647);
+    let tested = 0;
+    for (let i = 0; i < 40 && tested < 12; i++) {
+      const c = solvedCubie();
+      // 2〜3 個のコーナーだけをねじる
+      const picks = [0, 1, 2, 3, 4, 5, 6, 7].sort(() => rand() - 0.5).slice(0, rand() < 0.5 ? 2 : 3);
+      const tw = picks.length === 2 ? [1, 2] : rand() < 0.5 ? [1, 1, 1] : [2, 2, 2];
+      picks.forEach((p, k) => (c.co[p] = tw[k]));
+      const sol = solve(c)!;
+      const scr = sol.slice().reverse().map((m) => moveName(inverseMove(m))).join(' ');
+      const exp = expectedSolution(scr, settings);
+      const steps = exp.steps;
+      expect(steps.some((s) => s.kind === 'twist'), `${scr}\n${steps.map((s) => s.label).join(' / ')}`).toBe(false);
+      if (steps.some((s) => !s.alg)) continue;
+      tested++;
+      expect(steps.every((s) => s.twist)).toBe(true);
+      const st = applyMoves(solved(3), 3, toBaseMoves(`${scr} ${steps.map((s) => s.alg).join(' ')}`, 3));
+      const a = analyze(caseStateOf(st)!);
+      expect(a.corners.every((s, j) => s.piece === j && s.twist === 0), `${scr}\n${steps.map((s) => s.label).join(' / ')}`).toBe(true);
+      const ctx = { cornerBuffers: ['U2'], edgeBuffers: ['U2'], label: settings.label as never };
+      const turns = steps.flatMap((s) => toFaceTurns(s.alg!));
+
+      const j = judgeSegments(scr, segmentSolve(turns, turns.map((_, k) => k * 100), 0, ctx), settings);
+      expect(j.judged.every((x) => x.verdict === 'ok'), JSON.stringify(j.judged)).toBe(true);
+    }
+    expect(tested).toBeGreaterThan(5);
+  }, 60000);
 });

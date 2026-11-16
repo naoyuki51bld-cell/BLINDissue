@@ -27,18 +27,35 @@ export interface ExpectedStep {
   key?: string;
   /** 登録してある手順 */
   alg?: string;
+  /** ねじれたコーナーを 3-style の組み合わせで解く手順 */
+  twist?: boolean;
 }
 
 // ---- ステッカーとパーツ ----
-const idxOf = (pt: Kind3, id: StickerId) => stickerIndex(pt, id, N);
+const idxCache = new Map<string, number>();
+const idxOf = (pt: Kind3, id: StickerId) => {
+  const k = pt + id;
+  let v = idxCache.get(k);
+  if (v === undefined) idxCache.set(k, (v = stickerIndex(pt, id, N)));
+  return v;
+};
 const idOf = (pt: Kind3, idx: number) => STICKER_IDS.find((id) => idxOf(pt, id) === idx)!;
-const piece = (idx: number) => pieceStickers(idx, N);
+const pieceCache = new Map<number, number[]>();
+const piece = (idx: number) => {
+  let v = pieceCache.get(idx);
+  if (!v) pieceCache.set(idx, (v = pieceStickers(idx, N)));
+  return v;
+};
 
 /** ステッカー o が最終的に行くべき位置（パリティの入れ替えを含む） */
 type Home = (o: number) => number;
 const identity: Home = (o) => o;
 
+const repsCache: Partial<Record<Kind3, number[]>> = {};
 function allPieceReps(pt: Kind3): number[] {
+  return (repsCache[pt] ??= computeReps(pt));
+}
+function computeReps(pt: Kind3): number[] {
   const seen = new Set<number>();
   const out: number[] = [];
   for (const id of STICKER_IDS) {
@@ -223,8 +240,98 @@ export function expectedSolution(scramble: string, settings: MemoSettings): Expe
       steps.push({ kind: 'parity', label: `パリティ ${settings.single('corner', target)}`, key: specialKey(parityCase), alg: settings.algOf(specialKey(parityCase)) });
     }
   }
-  if (rest.length) steps.push({ kind: 'twist', label: `ツイスト ${rest.map((t) => twistLabel(t.ref, t.dir)).join(' ')}` });
+  if (rest.length) {
+    // ねじれを 3-style の組み合わせで解く（登録してある手順で、2〜3 個ずつ）
+    let R = ct.residual.slice() as CubeState;
+    const fixed = twisted.filter((t) => !rest.includes(t));
+    for (const t of fixed) for (const x of piece(idxOf('corner', t.ref))) R[x] = x;
+    const twistBuffers = settings.cornerBuffers.filter((b, i) => i === 0 || settings.hasBuffer('corner', b));
+    const combos: ExpectedStep[] = [];
+    for (;;) {
+      const found = twistCombo(R, twistBuffers, settings);
+      if (!found) break;
+      R = found.state;
+      for (const [buf, a, b] of found.pairs) {
+        const key = `corner|${buf}|${a}|${b}`;
+        combos.push({ kind: 'corner', label: `${settings.label('corner', buf, a, b)}（ツイスト）`, key, alg: settings.algOf(key), twist: true });
+      }
+    }
+    steps.push(...combos);
+    const left = rest.filter((t) => !pieceSolved(R, idxOf('corner', t.ref), identity));
+    if (left.length) steps.push({ kind: 'twist', label: `ツイスト ${left.map((t) => twistLabel(t.ref, t.dir)).join(' ')}` });
+  }
   return { steps, paritySwap, notes };
+}
+
+/** コーナーがねじれだけ（位置はすべて正しい）か。ねじれの数を返す（そうでなければ -1） */
+function twistOnlyCount(C: CubeState): number {
+  let n = 0;
+  for (const p of allPieceReps('corner')) {
+    if (pieceSolved(C, p, identity)) continue;
+    if (!inPlaceMisoriented(C, p, identity)) return -1;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * 登録してある 3-style を 2〜3 個組み合わせて、ねじれたコーナーを減らす。
+ * 例: UFR↻ と UBL↺ → バッファから UFR に入って UBL の別の面から戻る 2 手順。
+ * 「手順の数 + 残るねじれの数」が最も少ない組み合わせを選ぶ。
+ */
+const comboCache = new Map<string, ReturnType<typeof twistComboRaw>>();
+function twistCombo(R: CubeState, buffers: StickerId[], settings: MemoSettings) {
+  const key = `${buffers.join(',')}|${Array.from(R).join(',')}`;
+  if (comboCache.has(key)) return comboCache.get(key)!;
+  const r = twistComboRaw(R, buffers, settings);
+  if (comboCache.size > 500) comboCache.clear();
+  comboCache.set(key, r);
+  return r;
+}
+function twistComboRaw(R: CubeState, buffers: StickerId[], settings: MemoSettings): { state: CubeState; pairs: [StickerId, StickerId, StickerId][] } | null {
+  const count = twistOnlyCount(R);
+  if (count <= 1) return null;
+  const cs = caseStateOf(R);
+  if (!cs || analyze(cs).corners.reduce((n, c) => n + c.twist, 0) % 3 !== 0) return null; // ねじれの合計が合わない
+  const found: { best: { state: CubeState; pairs: [StickerId, StickerId, StickerId][]; score: number } | null } = { best: null };
+  const done = (depth: number) => !!found.best && found.best.score <= depth;
+  for (const depth of [2, 3]) {
+    if (done(depth)) break; // これ以上よくならない
+    for (const buf of buffers) {
+      const bufIdx = idxOf('corner', buf);
+      const bufPiece = piece(bufIdx);
+      const twistedT = STICKER_IDS.filter((id) => {
+        const i = idxOf('corner', id);
+        return !bufPiece.includes(i) && !pieceSolved(R, i, identity);
+      });
+      // バッファ自体がねじれているときは、ほかのパーツを経由する
+      const allT = STICKER_IDS.filter((id) => !bufPiece.includes(idxOf('corner', id)));
+      const bufTwisted = !pieceSolved(R, bufIdx, identity);
+      const tiers = depth === 2 ? (bufTwisted ? [twistedT, allT] : [twistedT]) : twistedT.length <= 9 ? [twistedT] : [];
+      for (const targets of tiers) {
+        const pairs: [StickerId, StickerId, StickerId][] = [];
+        const options: [StickerId, StickerId][] = [];
+        for (const a of targets) for (const b of targets) if (!samePiece('corner', a, b) && settings.algOf(`corner|${buf}|${a}|${b}`)) options.push([a, b]);
+        const dfs = (X: CubeState, d: number) => {
+          if (done(depth)) return;
+          if (d === 0) {
+            const c = twistOnlyCount(X);
+            if (c >= 0 && c < count && (!found.best || depth + c < found.best.score)) found.best = { state: X, pairs: pairs.slice(), score: depth + c };
+            return;
+          }
+          for (const [a, b] of options) {
+            pairs.push([buf, a, b]);
+            dfs(virtualSwap(virtualSwap(X, bufIdx, idxOf('corner', a)), bufIdx, idxOf('corner', b)), d - 1);
+            pairs.pop();
+          }
+        };
+        dfs(R, depth);
+        if (done(depth)) break;
+      }
+    }
+  }
+  const b = found.best;
+  return b ? { state: b.state, pairs: b.pairs } : null;
 }
 
 const cornerRefs = () => allPieceRefs('corner');
@@ -268,8 +375,39 @@ export function judgeSegments(scramble: string, segments: Segment[], settings: M
     if (e) return e;
     const c = nextPair('corner');
     if (c) return c;
-    const sp = expected.steps.find((s) => s.kind === 'parity' || s.kind === 'ltct' || s.kind === 'twist' || s.kind === 'flip');
+    const sp = expected.steps.find((s) => s.kind === 'parity' || s.kind === 'ltct' || s.kind === 'twist' || s.kind === 'flip' || s.twist);
     return sp ? sp.label : '（もう揃っているはず）';
+  };
+
+  /** コーナーを揃えるのに必要な手順の数（ねじれの組み合わせを含む） */
+  const cornerCost = (X: CubeState): number => {
+    const buffers = settings.cornerBuffers.slice(curBuffer.corner);
+    const t = trace(X, 'corner', buffers, identity, settings);
+    let cost = Math.ceil(t.segments.reduce((n, sg) => n + sg.targets.length, 0) / 2);
+    let R = t.residual;
+    for (;;) {
+      const f = twistCombo(R, buffers, settings);
+      if (!f) break;
+      cost += f.pairs.length;
+      R = f.state;
+    }
+    return cost + 2 * Math.max(0, twistOnlyCount(R));
+  };
+
+  /** 登録してある手順 n 個（2 個まで）でコーナーが揃うか */
+  const solvableWithin = (X: CubeState, n: number): boolean => {
+    if (twistOnlyCount(X) === 0) return true;
+    if (n <= 0) return false;
+    const unsolvedT = STICKER_IDS.filter((id) => !pieceSolved(X, idxOf('corner', id), identity));
+    for (const buf of settings.cornerBuffers.slice(curBuffer.corner)) {
+      const bufIdx = idxOf('corner', buf);
+      for (const a of unsolvedT)
+        for (const b of unsolvedT) {
+          if (samePiece('corner', a, b) || [a, b].some((x) => samePiece('corner', x, buf)) || !settings.algOf(`corner|${buf}|${a}|${b}`)) continue;
+          if (solvableWithin(virtualSwap(virtualSwap(X, bufIdx, idxOf('corner', a)), bufIdx, idxOf('corner', b)), n - 1)) return true;
+        }
+    }
+    return false;
   };
 
   /** バッファ buf で (a, b) を回すのが正しいか（サイクルブレイクはどのパーツでも可） */
@@ -285,7 +423,15 @@ export function judgeSegments(scramble: string, segments: Segment[], settings: M
       return virtualSwap(X, bufIdx, ti);
     };
     const c1 = step(C, a);
-    return !!c1 && !!step(c1, b);
+    if (c1 && step(c1, b)) return true;
+    // ねじれを 3-style の組み合わせで解く途中など: 残りの手順数が減っていれば正しい
+    if (pt === 'corner' && !samePiece('corner', a, b) && ![a, b].some((x) => samePiece('corner', x, buf))) {
+      const cost = cornerCost(C);
+      if (cost > 3) return false; // ねじれの段階（残りが少ない）だけ
+      const after = virtualSwap(virtualSwap(C, bufIdx, idxOf('corner', a)), bufIdx, idxOf('corner', b));
+      return solvableWithin(after, Math.min(cost - 1, 2));
+    }
+    return false;
   };
 
   for (const seg of segments) {
@@ -311,7 +457,11 @@ export function judgeSegments(scramble: string, segments: Segment[], settings: M
         const exp = nextPair(pt);
         judged.push({
           verdict: 'memo',
-          message: exp ? `この時点の正解は ${exp}（記憶ミスの可能性）` : `${pt === 'edge' ? 'エッジ' : 'コーナー'}はもう揃っているはずです（余計な手順）`,
+          message: exp
+            ? `この時点の正解は ${exp}（記憶ミスの可能性）`
+            : pt === 'corner' && twistOnlyCount(C) > 0
+              ? `ねじれの解き方が違います。正解の例: ${expected.steps.filter((s) => s.twist || s.kind === 'twist').map((s) => s.label).join(' → ')}`
+              : `${pt === 'edge' ? 'エッジ' : 'コーナー'}はもう揃っているはずです（余計な手順）`,
         });
       }
       C = after;
