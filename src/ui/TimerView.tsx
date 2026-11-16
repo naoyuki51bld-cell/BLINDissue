@@ -9,6 +9,8 @@ import { turnToString } from '../smartcube/tracker';
 import { segmentSolve } from '../timer/analysis';
 import { applyAlgColors, describeUnsolved, fromGrip, isSolvedColors, sameColors, solvedColors, toGrip, type Colors } from '../timer/cubeColors';
 import { randomScramble } from '../timer/scramble';
+import { judgeSegments, type Verdict } from '../timer/memo';
+import { memoSettingsFrom } from '../timer/memoSettings';
 import { isDone, parseScramble, startProgress, stepProgress, type ScrambleProgress } from '../timer/scrambleTracker';
 import { averageOf, bestOf, bestSingle, current, formatTime, meanOf, successRate, value } from '../timer/stats';
 import type { Penalty, Solve } from '../timer/types';
@@ -134,6 +136,7 @@ export function TimerView() {
         moves: turnsRef.current.length ? turnsRef.current.map(turnToString).join(' ') : undefined,
         times: timesRef.current.length ? timesRef.current.map((t) => Math.round(t)) : undefined,
         segments,
+        scrambleOk: scrambleOkRef.current,
         updatedAt: Date.now(),
       };
       addSolve(s);
@@ -145,7 +148,11 @@ export function TimerView() {
     [cubeOn, pieces, session, scramble, addSolve],
   );
 
+  const scrambleOkRef = useRef<boolean | undefined>(undefined);
   const start = () => {
+    // スマートキューブ: スタート時の状態がスクランブルどおりか（分析の前提）
+    const st = useSmartCube.getState();
+    scrambleOkRef.current = cubeOn && st.colors ? sameColors(toGrip(st.colors, st.grip), applyAlgColors(solvedColors(), scramble)) : undefined;
     startRef.current = performance.now();
     memoEndRef.current = null;
     turnsRef.current = [];
@@ -500,6 +507,9 @@ function TimeList({ solves, onOpen }: { solves: Solve[]; onOpen: (id: string) =>
 
 // ---- 1 回分の詳細（手順ごとの分析） ----
 
+const VERDICT_LABEL: Record<Verdict, string> = { ok: '正解', memo: '記憶ミス', exec: '実行ミス', order: '順番違い', extra: '余計な手順' };
+const VERDICT_MARK: Record<Verdict, string> = { ok: '✓', memo: '記憶ミス', exec: '実行ミス', order: '順番', extra: '余計' };
+
 function SolveDetail({ solve, onClose }: { solve: Solve; onClose: () => void }) {
   const updateSolve = useStore((s) => s.updateSolve);
   const deleteSolve = useStore((s) => s.deleteSolve);
@@ -513,6 +523,18 @@ function SolveDetail({ solve, onClose }: { solve: Solve; onClose: () => void }) 
   );
   const moveCount = solve.moves ? solve.moves.split(' ').length : 0;
   const exec = solve.memo !== undefined ? solve.total - solve.memo : null;
+  const pieces = useStore((s) => s.pieces);
+  const algs = useStore((s) => s.algs);
+  // 正解の解き方と、手順ごとの判定（今の設定・登録手順で計算）
+  const diag = useMemo(() => {
+    if (!segs.length) return null;
+    try {
+      return judgeSegments(solve.scramble, segs, memoSettingsFrom(pieces, algs));
+    } catch {
+      return null;
+    }
+  }, [solve.scramble, segs, pieces, algs]);
+  const firstMistake = diag?.judged.findIndex((j) => j.verdict === 'memo' || j.verdict === 'exec' || j.verdict === 'extra') ?? -1;
   return (
     <Modal wide title={<>{solve.penalty === 'DNF' ? `DNF(${formatTime(solve.total)})` : formatTime(value(solve))}</>} onClose={onClose}>
       <p className="muted small">
@@ -543,6 +565,21 @@ function SolveDetail({ solve, onClose }: { solve: Solve; onClose: () => void }) 
       </div>
       {solve.dnfReason && <p className="warn small">止めたときの状態: {solve.dnfReason}</p>}
       <p className="scramble-small">{solve.scramble}</p>
+      {solve.scrambleOk === false && <p className="warn small">スタート時のキューブがスクランブルと違う状態でした（スクランブルの回し間違いの可能性）。下の分析は正しくないかもしれません。</p>}
+      {diag && (
+        <div className={firstMistake >= 0 ? 'diag-summary ng' : 'diag-summary ok'}>
+          {firstMistake >= 0 ? (
+            <>
+              <b>
+                {firstMistake + 1} 番目の手順で{VERDICT_LABEL[diag.judged[firstMistake].verdict]}
+              </b>
+              ：{diag.judged[firstMistake].message}
+            </>
+          ) : (
+            <b>手順はすべて正しく選べています{solve.penalty === 'DNF' ? '（DNF の原因は最後のツイストやパリティ、または回し方の可能性）' : ''}</b>
+          )}
+        </div>
+      )}
       {segs.length > 0 && (
         <div className="stack">
           <div className="field-label">手順ごとの分析（止まり = 前の手順を回し終えてから回し始めるまで）</div>
@@ -553,6 +590,7 @@ function SolveDetail({ solve, onClose }: { solve: Solve; onClose: () => void }) 
                 <th>手順</th>
                 <th>止まり</th>
                 <th>実行</th>
+                {diag && <th>判定</th>}
               </tr>
             </thead>
             <tbody>
@@ -565,12 +603,38 @@ function SolveDetail({ solve, onClose }: { solve: Solve; onClose: () => void }) 
                   </td>
                   <td>{formatTime(s.pause)}</td>
                   <td>{formatTime(s.exec)}</td>
+                  {diag && (
+                    <td className={`verdict v-${diag.judged[i]?.verdict ?? 'ok'}`}>
+                      {VERDICT_MARK[diag.judged[i]?.verdict ?? 'ok']}
+                      {diag.judged[i]?.message && <div className="verdict-msg">{diag.judged[i].message}</div>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="muted small">赤い行は時間がかかった上位 3 つです。「区切れなかった手」は、手順の途中で間違えたか、前後の手順の手がまとまって回された部分です。</p>
+          <p className="muted small">赤い行は時間がかかった上位 3 つです。「区切れなかった手」は、手順の途中で間違えたか、前後の手順の手がまとまって回された部分です。判定はサイクルブレイクの選び方が違っても、正しければ ✓ にしています。</p>
         </div>
+      )}
+      {diag && (
+        <details>
+          <summary className="field-label">正解の解き方（{diag.expected.steps.length} 手順）</summary>
+          <ol className="expected-list">
+            {diag.expected.steps.map((st, i) => (
+              <li key={i}>
+                <b>{st.label}</b>
+                <span className="mono small">{st.alg ?? (st.kind === 'twist' ? '' : '（手順未登録）')}</span>
+              </li>
+            ))}
+          </ol>
+          {diag.expected.paritySwap && <p className="muted small">パリティのため、エッジは {diag.expected.paritySwap.replace(/^エッジ\s*/, '')} が入れ替わった状態になるようにメモしています。</p>}
+          {diag.expected.notes.map((n, i) => (
+            <p key={i} className="muted small">
+              {n}
+            </p>
+          ))}
+          <p className="muted small">解く順番: エッジ → フリップ → コーナー → LTCT／パリティ → ツイスト。サイクルブレイクは番号の若いステッカーを選んでいます。</p>
+        </details>
       )}
       <div className="row end">
         <button

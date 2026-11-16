@@ -30,6 +30,8 @@ export interface Solve {
   moves?: string;
   times?: number[];
   segments?: Segment[];
+  /** スタート時、キューブの状態がスクランブルどおりだったか（スマートキューブ使用時） */
+  scrambleOk?: boolean;
   updatedAt: number;
   /** 削除済み（同期用） */
   deleted?: boolean;

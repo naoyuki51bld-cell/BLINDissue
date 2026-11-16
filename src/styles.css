@@ -1473,3 +1473,47 @@ details summary {
 .ng-text {
   color: var(--danger);
 }
+.diag-summary {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+.diag-summary.ok {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.diag-summary.ng {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.verdict {
+  font-weight: 700;
+  white-space: normal !important;
+  text-align: left !important;
+  min-width: 4.5em;
+}
+.verdict.v-ok {
+  color: var(--ok);
+}
+.verdict.v-memo,
+.verdict.v-exec,
+.verdict.v-extra {
+  color: var(--danger);
+}
+.verdict.v-order {
+  color: var(--warn-text);
+}
+.verdict-msg {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+.expected-list {
+  margin: 6px 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.expected-list li span {
+  margin-left: 8px;
+  color: var(--muted);
+}
