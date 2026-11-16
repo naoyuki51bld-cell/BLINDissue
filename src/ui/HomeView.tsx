@@ -6,7 +6,7 @@ import { avgTime, formatSec, isDue, isNew } from '../data/srs';
 import { ProgressBar } from './AlgsView';
 import { earlierBuffers } from '../data/buffers';
 
-export type Tab = 'home' | 'algs' | 'pairs' | 'practice' | 'settings';
+export type Tab = 'home' | 'algs' | 'pairs' | 'practice' | 'timer' | 'settings';
 
 export function HomeView({ go }: { go: (t: Tab) => void }) {
   const pieces = useStore((s) => s.pieces);

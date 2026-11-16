@@ -13,14 +13,15 @@ export function chunkNameForReview(key: string): string {
   return kind === 'p' ? 'reviews-pairs' : `reviews-${second}`;
 }
 
-export function splitChunks(d: Pick<AppData, 'pieces' | 'algs' | 'pairs' | 'reviews'>): Chunks {
+export function splitChunks(d: Pick<AppData, 'pieces' | 'algs' | 'pairs' | 'reviews'> & { solves?: AppData['solves'] }): Chunks {
   const out: Chunks = { pieces: { ...d.pieces }, pairs: { ...d.pairs } };
+  if (d.solves && Object.keys(d.solves).length) out.solves = { ...d.solves };
   for (const [k, v] of Object.entries(d.algs)) (out[chunkNameForAlg(k)] ??= {})[k] = v;
   for (const [k, v] of Object.entries(d.reviews)) (out[chunkNameForReview(k)] ??= {})[k] = v;
   return out;
 }
 
-export function joinChunks(chunks: Chunks): Pick<AppData, 'pieces' | 'algs' | 'pairs' | 'reviews'> {
+export function joinChunks(chunks: Chunks): Pick<AppData, 'pieces' | 'algs' | 'pairs' | 'reviews' | 'solves'> {
   const algs: Record<string, AlgEntry> = {};
   const reviews: Record<string, ReviewState> = {};
   for (const [name, data] of Object.entries(chunks)) {
@@ -32,6 +33,7 @@ export function joinChunks(chunks: Chunks): Pick<AppData, 'pieces' | 'algs' | 'p
     pairs: (chunks.pairs ?? {}) as Record<string, PairEntry>,
     algs,
     reviews,
+    solves: (chunks.solves ?? {}) as AppData['solves'],
   };
 }
 

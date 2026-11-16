@@ -1300,3 +1300,160 @@ details summary {
 .app.immersive {
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }
+
+/* timer (csTimer 風) */
+.timer-page.running {
+  min-height: calc(100vh - 60px);
+  padding: 0;
+}
+.timer-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34vh;
+  padding: 20px 12px;
+  border-radius: var(--radius);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  cursor: pointer;
+  text-align: center;
+}
+.timer-page.running .timer-area {
+  min-height: calc(100vh - 70px);
+  border-radius: 0;
+}
+.timer-big {
+  font-size: clamp(3.6rem, 19vw, 8rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  line-height: 1.05;
+}
+.timer-area.phase-arming .timer-big {
+  color: var(--danger);
+}
+.timer-area.phase-ready .timer-big {
+  color: var(--ok);
+}
+.timer-split {
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.timer-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  max-width: 34em;
+}
+.timer-dnf {
+  color: var(--danger);
+  font-weight: 600;
+}
+.scramble-text {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 1.15rem;
+  line-height: 1.7;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.sc.done {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.sc.next {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.scramble-small {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.stats-table th,
+.stats-table td {
+  padding: 4px 6px;
+  text-align: right;
+}
+.stats-table tbody th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+}
+.stats-table td {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 1.05rem;
+}
+.time-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.time-list li + li {
+  border-top: 1px solid var(--border);
+}
+.time-row {
+  display: grid;
+  grid-template-columns: 2.5em auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.time-main {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.time-main.dnf {
+  color: var(--danger);
+}
+.seg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+.seg-table th,
+.seg-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.seg-table td:nth-child(3),
+.seg-table td:nth-child(4) {
+  text-align: right;
+  white-space: nowrap;
+}
+.seg-table tr.slow td {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.seg-table tr.unknown td {
+  color: var(--muted);
+}
+.seg-moves {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.tabs-bottom button {
+  font-size: 0.66rem;
+}

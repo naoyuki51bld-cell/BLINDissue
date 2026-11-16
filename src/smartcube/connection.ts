@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import type { Face } from '../cube/cube';
 import { DEFAULT_GRIP, gripMap, parseFaceTurn, type FaceTurn, type Grip } from './tracker';
+import { applyTurnColors, fromFacelets, solvedColors, type Colors } from '../timer/cubeColors';
 
 type Status = 'disconnected' | 'connecting' | 'connected';
 
@@ -21,6 +22,12 @@ interface SmartCubeState {
   battery: number | null;
   error: string;
   grip: Grip;
+  /** キューブ本来の向きでの色の状態（分からなければ null） */
+  colors: Colors | null;
+  /** キューブに今の状態を問い合わせる（届くまで最大 1.5 秒待つ） */
+  requestState: () => Promise<Colors | null>;
+  /** 今の状態を「揃っている」として扱う（状態を取得できない機種・動作確認用） */
+  assumeSolved: () => void;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   setGrip: (g: Grip) => void;
@@ -30,7 +37,8 @@ interface SmartCubeState {
 }
 
 const listeners = new Set<Listener>();
-let connection: { disconnect: () => Promise<void> } | null = null;
+let connection: { disconnect: () => Promise<void>; sendCubeCommand: (c: { type: 'REQUEST_FACELETS' | 'REQUEST_BATTERY' }) => Promise<void> } | null = null;
+let stateWaiters: ((c: Colors | null) => void)[] = [];
 
 const GRIP_KEY = 'smartcube.grip';
 const MAC_KEY = 'smartcube.mac';
@@ -79,6 +87,8 @@ export const useSmartCube = create<SmartCubeState>()((set, get) => {
   const dispatch = (raw: string) => {
     const t = parseFaceTurn(raw);
     if (!t) return;
+    const cur = get().colors;
+    if (cur) set({ colors: applyTurnColors(cur, t) });
     const map = gripMap(get().grip);
     const e: MoveEvent = { turn: { face: map[t.face as Face], amount: t.amount }, raw, time: performance.now() };
     listeners.forEach((fn) => fn(e));
@@ -90,6 +100,17 @@ export const useSmartCube = create<SmartCubeState>()((set, get) => {
     battery: null,
     error: '',
     grip: loadGrip(),
+    colors: null,
+    requestState: async () => {
+      if (!connection) return get().colors;
+      const p = new Promise<Colors | null>((resolve) => {
+        stateWaiters.push(resolve);
+        setTimeout(() => resolve(get().colors), 1500);
+      });
+      await connection.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => undefined);
+      return p;
+    },
+    assumeSolved: () => set({ colors: solvedColors() }),
     setGrip: (g) => {
       set({ grip: g });
       try {
@@ -102,7 +123,10 @@ export const useSmartCube = create<SmartCubeState>()((set, get) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
-    emitRaw: (moves) => moves.split(/\s+/).filter(Boolean).forEach(dispatch),
+    emitRaw: (moves) => {
+      if (!get().colors) set({ colors: solvedColors() });
+      moves.split(/\s+/).filter(Boolean).forEach(dispatch);
+    },
     connect: async () => {
       const support = bluetoothSupport();
       if (!support.ok) {
@@ -129,13 +153,20 @@ export const useSmartCube = create<SmartCubeState>()((set, get) => {
         set({ status: 'connected', deviceName: conn.deviceName });
         conn.events$.subscribe((ev) => {
           if (ev.type === 'MOVE') dispatch(ev.move);
+          else if (ev.type === 'FACELETS') {
+            const c = fromFacelets(ev.facelets);
+            if (c) set({ colors: c });
+            stateWaiters.forEach((fn) => fn(c));
+            stateWaiters = [];
+          }
           else if (ev.type === 'BATTERY') set({ battery: ev.batteryLevel });
           else if (ev.type === 'DISCONNECT') {
             connection = null;
-            set({ status: 'disconnected', battery: null });
+            set({ status: 'disconnected', battery: null, colors: null });
           }
         });
         conn.sendCubeCommand({ type: 'REQUEST_BATTERY' }).catch(() => undefined);
+        conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => undefined);
       } catch (e) {
         connection = null;
         const msg = e instanceof Error ? e.message : String(e);

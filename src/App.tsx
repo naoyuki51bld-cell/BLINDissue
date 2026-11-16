@@ -4,6 +4,7 @@ import { HomeView, type Tab } from './ui/HomeView';
 import { ExportPanel, ImportPanel } from './ui/ImportExport';
 import { PairsView } from './ui/PairsView';
 import { PracticeView } from './ui/PracticeView';
+import { TimerView } from './ui/TimerView';
 import { SchemeEditor } from './ui/SchemeEditor';
 import { usePersisted } from './ui/shared';
 import { SyncPanel } from './ui/SyncPanel';
@@ -17,6 +18,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'algs', label: '手順', icon: '⟲' },
   { id: 'pairs', label: 'ペア', icon: 'あ' },
   { id: 'practice', label: '練習', icon: '▶' },
+  { id: 'timer', label: 'タイマー', icon: '⏱' },
   { id: 'settings', label: '設定', icon: '⚙' },
 ];
 
@@ -57,6 +59,7 @@ export function App() {
         {tab === 'algs' && <AlgsView />}
         {tab === 'pairs' && <PairsView />}
         {tab === 'practice' && <PracticeView />}
+        {tab === 'timer' && <TimerView />}
         {tab === 'settings' && (
           <div className="page">
             <SyncPanel />

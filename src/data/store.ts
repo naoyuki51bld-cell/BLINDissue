@@ -4,6 +4,7 @@ import { del, get, set } from 'idb-keyval';
 import { DEFAULT_SIZE, PIECE_TYPES, type PieceType, type StickerId } from '../cube/pieces';
 import { labelsFromList, PRESETS, type Labels } from './schemes';
 import { newReview, review, type Grade, type ReviewState } from './srs';
+import type { Solve } from '../timer/types';
 
 export type Status = 'none' | 'learning' | 'learned' | 'auto';
 export const STATUS_LABEL: Record<Status, string> = {
@@ -52,6 +53,8 @@ export interface AppData {
   algs: Record<string, AlgEntry>;
   pairs: Record<string, PairEntry>;
   reviews: Record<string, ReviewState>;
+  /** タイマーの記録 */
+  solves: Record<string, Solve>;
 }
 
 export const algKey = (pt: PieceType, buffer: StickerId, a: StickerId, b: StickerId) => `${pt}|${buffer}|${a}|${b}`;
@@ -83,7 +86,7 @@ export function defaultData(): AppData {
       kana: pt !== 'corner',
     };
   }
-  return { version: 1, pieces, algs: {}, pairs: {}, reviews: {} };
+  return { version: 1, pieces, algs: {}, pairs: {}, reviews: {}, solves: {} };
 }
 
 interface Actions {
@@ -96,6 +99,9 @@ interface Actions {
   recordReview: (key: string, grade: Grade, timeMs: number, execMs?: number) => void;
   resetReview: (key: string) => void;
   replaceAll: (data: AppData) => void;
+  addSolve: (s: Solve) => void;
+  updateSolve: (id: string, patch: Partial<Solve>) => void;
+  deleteSolve: (id: string) => void;
 }
 
 const emptyAlg = (): AlgEntry => ({ algs: [], main: 0, status: 'none', memo: '', updatedAt: Date.now() });
@@ -141,6 +147,16 @@ export const useStore = create<AppData & Actions>()(
       recordReview: (key, grade, timeMs, execMs) =>
         setState((s) => ({ reviews: { ...s.reviews, [key]: review(s.reviews[key], grade, timeMs, Date.now(), execMs) } })),
       resetReview: (key) => setState((s) => ({ reviews: { ...s.reviews, [key]: { ...newReview(), lastReviewed: Date.now() } } })),
+      addSolve: (sv) => setState((s) => ({ solves: { ...s.solves, [sv.id]: sv } })),
+      updateSolve: (id, patch) =>
+        setState((s) => (s.solves[id] ? { solves: { ...s.solves, [id]: { ...s.solves[id], ...patch, updatedAt: Date.now() } } } : {})),
+      // 同期のため、消すときも記録を残す（中身は空にする）
+      deleteSolve: (id) =>
+        setState((s) =>
+          s.solves[id]
+            ? { solves: { ...s.solves, [id]: { ...s.solves[id], deleted: true, moves: undefined, times: undefined, segments: undefined, updatedAt: Date.now() } } }
+            : {},
+        ),
       replaceAll: (data) => {
         setState(() => ({ ...defaultData(), ...data }));
         replaceListeners.forEach((fn) => fn());
@@ -150,7 +166,7 @@ export const useStore = create<AppData & Actions>()(
       name: 'bld-trainer',
       version: 1,
       storage: createJSONStorage(() => idbStorage),
-      partialize: (s) => ({ version: s.version, pieces: s.pieces, algs: s.algs, pairs: s.pairs, reviews: s.reviews }),
+      partialize: (s) => ({ version: s.version, pieces: s.pieces, algs: s.algs, pairs: s.pairs, reviews: s.reviews, solves: s.solves }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppData>;
         const d = defaultData();
@@ -169,7 +185,7 @@ export const replaceListeners = new Set<() => void>();
 
 export function exportData(): AppData {
   const s = useStore.getState();
-  return { version: 1, pieces: s.pieces, algs: s.algs, pairs: s.pairs, reviews: s.reviews };
+  return { version: 1, pieces: s.pieces, algs: s.algs, pairs: s.pairs, reviews: s.reviews, solves: s.solves };
 }
 
 export function isAppData(x: unknown): x is AppData {

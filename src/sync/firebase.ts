@@ -168,13 +168,13 @@ function start(user: User) {
   );
   unsubStore = useStore.subscribe((s, prev) => {
     if (applyingRemote) return;
-    if (s.algs !== prev.algs || s.pairs !== prev.pairs || s.reviews !== prev.reviews || s.pieces !== prev.pieces) schedulePush(3000);
+    if (s.algs !== prev.algs || s.pairs !== prev.pairs || s.reviews !== prev.reviews || s.pieces !== prev.pieces || s.solves !== prev.solves) schedulePush(3000);
   });
 }
 
 function localChunks(): Chunks {
   const s = useStore.getState();
-  return splitChunks({ pieces: s.pieces, algs: s.algs, pairs: s.pairs, reviews: s.reviews });
+  return splitChunks({ pieces: s.pieces, algs: s.algs, pairs: s.pairs, reviews: s.reviews, solves: s.solves });
 }
 
 function applyRemote(incoming: Chunks) {
@@ -191,7 +191,7 @@ function applyRemote(incoming: Chunks) {
   if (!changed) return;
   const joined = joinChunks(merged);
   applyingRemote = true;
-  useStore.setState({ pieces: { ...useStore.getState().pieces, ...joined.pieces }, algs: joined.algs, pairs: joined.pairs, reviews: joined.reviews });
+  useStore.setState({ pieces: { ...useStore.getState().pieces, ...joined.pieces }, algs: joined.algs, pairs: joined.pairs, reviews: joined.reviews, solves: joined.solves });
   applyingRemote = false;
 }
 
