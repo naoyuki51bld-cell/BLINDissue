@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { PIECE_LABEL, PIECE_TYPES, stickerName, targetsFor, type PieceType } from '../cube/pieces';
-import { labelOf, pairText, secondLabelOf } from '../data/labels';
+import { labelOf, pairReading, pairText, secondLabelOf } from '../data/labels';
 import { algKey, defaultData, exportData, isAppData, useStore, type AlgEntry, type PairEntry } from '../data/store';
 import { importAlgTable, importPairTable } from '../io/importer';
 import { download, parseDelimited, readExcel, toCsv, writeExcel, type Table } from '../io/table';
@@ -9,9 +9,12 @@ import { earlierBuffers } from '../data/buffers';
 
 type Policy = 'overwrite' | 'fill' | 'append';
 
-export function ImportPanel() {
-  const [pt, setPt] = usePersisted<PieceType>('import.pt', 'corner');
-  const [content, setContent] = useState<'alg' | 'pair'>('alg');
+export function ImportPanel({ pairsOnly, piece, bare }: { pairsOnly?: boolean; piece?: PieceType; bare?: boolean } = {}) {
+  const [savedPt, setPt] = usePersisted<PieceType>('import.pt', 'corner');
+  const [pairPt, setPairPt] = useState<PieceType | null>(null);
+  const [contentState, setContent] = useState<'alg' | 'pair'>('alg');
+  const content = pairsOnly ? 'pair' : contentState;
+  const pt = content === 'pair' ? pairPt ?? piece ?? savedPt : savedPt;
   const [table, setTable] = useState<Table | null>(null);
   const [source, setSource] = useState('');
   const [sheets, setSheets] = useState<{ names: string[]; read: (s: string) => Promise<Table> } | null>(null);
@@ -26,10 +29,23 @@ export function ImportPanel() {
   const setPairsBulk = useStore((s) => s.setPairsBulk);
 
   const algResult = useMemo(() => (table && content === 'alg' ? importAlgTable(pt, cfg, table) : null), [table, content, pt, cfg]);
+  const allPieces = useStore((s) => s.pieces);
   const pairResult = useMemo(
-    () => (table && content === 'pair' ? importPairTable(table, [...Object.values(cfg.labels), ...(cfg.dual ? Object.values(cfg.labels2 ?? {}) : [])].filter(Boolean)) : null),
-    [table, content, cfg],
+    () => (table && content === 'pair' ? importPairTable(pt, cfg, table, (p) => pairReading(cfg, p)) : null),
+    [table, content, pt, cfg],
   );
+  // レターペア: コーナーとエッジのどちらの文字で読むと多く一致するかで、取り込み先を自動で選ぶ
+  const choosePairPiece = (t: Table) => {
+    if (content !== 'pair') return;
+    const score = (p: PieceType) => importPairTable(p, allPieces[p], t, (x) => pairReading(allPieces[p], x)).entries.length;
+    const cur = piece ?? savedPt;
+    const other: PieceType = cur === 'edge' ? 'corner' : 'edge';
+    setPairPt(score(other) > score(cur) ? other : cur);
+  };
+  const loadTable = (t: Table) => {
+    setTable(t);
+    choosePairPiece(t);
+  };
 
   const onFile = async (file: File) => {
     setMessage('');
@@ -39,12 +55,12 @@ export function ImportPanel() {
         const x = await readExcel(file);
         setSheets({ names: x.sheets, read: x.read });
         setSheet(x.sheets[0]);
-        setTable(await x.read(x.sheets[0]));
+        loadTable(await x.read(x.sheets[0]));
       } else if (/\.xls$/i.test(file.name)) {
         setMessage('古い .xls 形式は読めません。Excel で .xlsx か CSV として保存し直してください。');
       } else {
         setSheets(null);
-        setTable(parseDelimited(await file.text()));
+        loadTable(parseDelimited(await file.text()));
       }
     } catch (e) {
       setMessage(`読み込めませんでした: ${String(e)}`);
@@ -76,36 +92,64 @@ export function ImportPanel() {
     if (!pairResult) return;
     const patch: Record<string, Partial<PairEntry>> = {};
     let n = 0;
+    let kept = 0;
     for (const e of pairResult.entries) {
       const cur = pairs[e.pair];
-      if (cur?.word && policy !== 'overwrite') continue;
+      if (cur?.word && policy !== 'overwrite') {
+        if (cur.word !== e.word) kept++;
+        continue;
+      }
       patch[e.pair] = { word: e.word, ...(e.memo ? { memo: e.memo } : {}), status: cur?.status && cur.status !== 'none' ? cur.status : 'learning' };
       n++;
     }
     setPairsBulk(patch);
-    setMessage(`${n} ペアを取り込みました。`);
+    setMessage(`${n} ペアを取り込みました。${kept ? `すでに別の単語が登録してあった ${kept} ペアはそのまま残しました（上書きするには「上書き」を選んで取り込み直してください）。` : ''}`);
     setTable(null);
   };
 
-  return (
-    <Section title="スプレッドシートから取り込む">
+  const pieceTabs = (
+    <PieceTabs
+      value={pt}
+      onChange={(p) => {
+        if (content === 'pair') setPairPt(p);
+        else setPt(p);
+      }}
+    />
+  );
+  const body = (
+    <>
+      {pairsOnly ? (
+        <p className="muted small">
+          Excel（.xlsx）・CSV のファイル、またはスプレッドシートからコピーした範囲を貼り付けて取り込めます。形式は自動で判別します。
+          <br />
+          <b>表形式</b>：1 行目に 2 文字目、1 列目に 1 文字目、セルに単語（逆向きでも可）
+          <br />
+          <b>リスト形式</b>：「ペア ｜ 単語 ｜ メモ」または「1 文字目 ｜ 2 文字目 ｜ 単語 ｜ メモ」
+          <br />
+          ペアの文字は今の文字の割り振りで照合します（大文字・小文字の違い、UFR のような位置名、ローマ字のペアをかなで書いたものも可）。セル内で改行した 2 行目以降はメモになります。
+        </p>
+      ) : (
+        <>
+          <p className="muted small">
+            Excel（.xlsx）・CSV のファイル、またはスプレッドシートからコピーした範囲を貼り付けて取り込めます。
+            <br />
+            形式は自動で判別します。<b>表形式</b>（1 行目に 2 文字目、1 列目に 1 文字目、セルに手順や単語）と<b>リスト形式</b>（「ペア ｜ 手順 ｜ メモ」または「1 文字目 ｜ 2 文字目 ｜ 手順」）に対応。文字は下の「文字の割り振り」で設定したもの、または UFR のような位置名で照合します。セル内の改行で区切った手順は候補として取り込みます。
+          </p>
+          <div className="segmented">
+            <button className={content === 'alg' ? 'active' : ''} onClick={() => setContent('alg')}>
+              手順
+            </button>
+            <button className={content === 'pair' ? 'active' : ''} onClick={() => setContent('pair')}>
+              レターペア
+            </button>
+          </div>
+        </>
+      )}
+      {pieceTabs}
       <p className="muted small">
-        Excel（.xlsx）・CSV のファイル、またはスプレッドシートからコピーした範囲を貼り付けて取り込めます。
-        <br />
-        形式は自動で判別します。<b>表形式</b>（1 行目に 2 文字目、1 列目に 1 文字目、セルに手順）と<b>リスト形式</b>（「ペア ｜ 手順 ｜ メモ」または「1 文字目 ｜ 2 文字目 ｜ 手順」）に対応。文字は下の「文字の割り振り」で設定したもの、または UFR のような位置名で照合します。セル内の改行で区切った手順は候補として取り込みます。
-      </p>
-      <div className="segmented">
-        <button className={content === 'alg' ? 'active' : ''} onClick={() => setContent('alg')}>
-          手順
-        </button>
-        <button className={content === 'pair' ? 'active' : ''} onClick={() => setContent('pair')}>
-          レターペア
-        </button>
-      </div>
-      <PieceTabs value={pt} onChange={setPt} />
-      <p className="muted small">
-        取り込み先: {PIECE_LABEL[pt]}
+        {content === 'pair' ? '照合に使う文字' : '取り込み先'}: {PIECE_LABEL[pt]}
         {content === 'alg' && `（バッファ ${stickerName(pt, cfg.buffer)}）`}
+        {content === 'pair' && table && '（一致が多い方を自動で選びました）'}
       </p>
       <div className="row wrap">
         <label className="btn">
@@ -117,7 +161,7 @@ export function ImportPanel() {
             value={sheet}
             onChange={async (e) => {
               setSheet(e.target.value);
-              setTable(await sheets.read(e.target.value));
+              loadTable(await sheets.read(e.target.value));
             }}
             aria-label="シート"
           >
@@ -140,7 +184,7 @@ export function ImportPanel() {
         onClick={() => {
           setSource('貼り付け');
           setSheets(null);
-          setTable(parseDelimited(paste));
+          loadTable(parseDelimited(paste));
         }}
       >
         貼り付けた内容を読む
@@ -175,11 +219,19 @@ export function ImportPanel() {
         <div className="preview stack">
           <p>
             <b>{pairResult.mode === 'matrix' ? '表形式' : 'リスト形式'}</b>として {pairResult.entries.length} ペアを読み取りました。
+            {pairResult.transposed && '（上の行を 1 文字目・左の列を 2 文字目として読みました）'}
           </p>
+          {pairResult.unmatched.length > 0 && (
+            <p className="warn small">
+              文字の割り振りと一致しなかったもの: {pairResult.unmatched.slice(0, 30).join('、')}
+              {pairResult.unmatched.length > 30 ? ' …' : ''}
+            </p>
+          )}
           <ul className="preview-list">
             {pairResult.entries.slice(0, 8).map((e, i) => (
               <li key={i}>
                 <b>{e.pair}</b> {e.word}
+                {pairs[e.pair]?.word && pairs[e.pair].word !== e.word && <span className="muted small">（今: {pairs[e.pair].word}）</span>}
               </li>
             ))}
           </ul>
@@ -190,8 +242,9 @@ export function ImportPanel() {
         </div>
       )}
       {message && <p className="notice">{message}</p>}
-    </Section>
+    </>
   );
+  return bare ? <div className="stack">{body}</div> : <Section title="スプレッドシートから取り込む">{body}</Section>;
 }
 
 function PolicyPicker({ policy, setPolicy, allowAppend }: { policy: Policy; setPolicy: (p: Policy) => void; allowAppend?: boolean }) {

@@ -16,7 +16,7 @@ export interface Matcher {
 
 const clean = (s: string) => s.normalize('NFKC').trim();
 
-function lookup(pt: PieceType, labels: Record<StickerId, string>) {
+function lookup(pt: PieceType, labels: Record<StickerId, string>, withNames = true) {
   const exact = new Map<string, StickerId[]>();
   const loose = new Map<string, StickerId[]>();
   const add = (m: Map<string, StickerId[]>, k: string, id: StickerId) => {
@@ -31,7 +31,7 @@ function lookup(pt: PieceType, labels: Record<StickerId, string>) {
     add(loose, label.toLowerCase(), id);
   }
   // 位置名（UFR など）は文字と衝突しないときだけ使う
-  for (const id of STICKER_IDS) {
+  for (const id of withNames ? STICKER_IDS : []) {
     const name = stickerName(pt, id);
     if (!exact.has(name)) add(exact, name, id);
     if (!loose.has(name.toLowerCase())) add(loose, name.toLowerCase(), id);
@@ -48,7 +48,9 @@ function lookup(pt: PieceType, labels: Record<StickerId, string>) {
 
 export function makeMatcher(pt: PieceType, cfg: PieceConfig): Matcher {
   const matchFirst = lookup(pt, cfg.labels);
-  const matchSecond = cfg.dual ? lookup(pt, { ...cfg.labels, ...Object.fromEntries(Object.entries(cfg.labels2 ?? {}).filter(([, v]) => v)) }) : matchFirst;
+  // 2 文字目: 2 文字目のセットを優先し、無ければ 1 文字目のセット・位置名
+  const second2 = cfg.dual ? lookup(pt, Object.fromEntries(Object.entries(cfg.labels2 ?? {}).filter(([, v]) => v)), false) : null;
+  const matchSecond = second2 ? (t: string) => second2(t) ?? matchFirst(t) : matchFirst;
   const match = (token: string) => matchFirst(token) ?? matchSecond(token);
   const splitPair = (text: string): [StickerId, StickerId] | null => {
     const t = clean(text);
@@ -214,41 +216,129 @@ export interface ImportedPair {
   memo?: string;
 }
 
-/** レターペア: 行列形式（行=1文字目、列=2文字目、セル=単語）またはリスト形式（ペア | 単語 | メモ） */
-export function importPairTable(table: Table, knownLabels: string[]): { mode: 'matrix' | 'list'; entries: ImportedPair[] } {
-  const known = new Set(knownLabels.map(clean));
+export interface PairImportResult {
+  mode: 'matrix' | 'list';
+  /** 表形式で「上の行 = 1 文字目」と判定して読み替えたか */
+  transposed?: boolean;
+  entries: ImportedPair[];
+  /** 文字の割り振りと一致しなかった見出し・ペア */
+  unmatched: string[];
+}
+
+/** セルの中身を単語とメモに分ける（2 行目以降・括弧書きはメモ） */
+function splitWordCell(cell: string): { word: string; memo?: string } {
+  const lines = cell.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  return { word: lines[0] ?? '', memo: lines.slice(1).join(' / ') || undefined };
+}
+
+/**
+ * レターペアの表を読む。
+ * 表形式（1 行目に 2 文字目、1 列目に 1 文字目、セルに単語。逆向きも自動判定）、
+ * リスト形式（「ペア ｜ 単語 ｜ メモ」または「1 文字目 ｜ 2 文字目 ｜ 単語 ｜ メモ」）に対応。
+ * ペアの文字は今の文字の割り振りに合わせて書き直す（大文字・小文字、位置名、ローマ字の読みがなも照合）。
+ */
+export function importPairTable(pt: PieceType, cfg: PieceConfig, table: Table, reading?: (pair: string) => string | null): PairImportResult {
+  const m = makeMatcher(pt, cfg);
+  const firstOnly = lookup(pt, cfg.labels, false);
+  const secondOnly = cfg.dual ? lookup(pt, Object.fromEntries(Object.entries(cfg.labels2 ?? {}).filter(([, v]) => v)), false) : firstOnly;
+  const text = (a: StickerId, b: StickerId) => (cfg.labels[a] || stickerName(pt, a)) + ((cfg.dual && cfg.labels2?.[b]) || cfg.labels[b] || stickerName(pt, b));
+  const unmatched = new Set<string>();
+
+  // ---- 表形式: 見出しの行と列を探す ----
   let headerRow = -1;
   let headerScore = 0;
   for (let r = 0; r < Math.min(table.length, 10); r++) {
-    const score = table[r].filter((c) => known.has(clean(c))).length;
+    const score = table[r].filter((c) => c && m.match(c)).length;
     if (score > headerScore) {
       headerScore = score;
       headerRow = r;
     }
   }
-  const entries: ImportedPair[] = [];
   if (headerScore >= 4) {
     const header = table[headerRow];
-    const labelCol = 0;
-    for (let r = headerRow + 1; r < table.length; r++) {
-      const row = table[r];
-      const first = clean(row[labelCol] ?? '');
-      if (!first) continue;
-      header.forEach((h, c) => {
-        if (c === labelCol) return;
-        const second = clean(h);
-        const word = (row[c] ?? '').trim();
-        if (second && word) entries.push({ pair: first + second, word });
+    const body = table.slice(headerRow + 1);
+    const width = Math.max(...table.map((r) => r.length));
+    let labelCol = 0;
+    let colScore = -1;
+    for (let c = 0; c < Math.min(width, 5); c++) {
+      const sc = body.filter((r) => r[c] && m.match(r[c])).length;
+      if (sc > colScore) {
+        colScore = sc;
+        labelCol = c;
+      }
+    }
+    // 向き: 2 セット使う設定なら、見出しがどちらのセットに多く一致するかで決める
+    let transposed = false;
+    if (cfg.dual) {
+      const hs = header.filter((h, c) => h && c !== labelCol);
+      const rs = body.map((r) => r[labelCol]).filter(Boolean);
+      const count = (xs: string[], f: (t: string) => StickerId | null) => xs.filter((x) => f(x)).length;
+      const normal = count(hs, secondOnly) + count(rs, firstOnly);
+      const swapped = count(hs, firstOnly) + count(rs, secondOnly);
+      transposed = swapped > normal;
+    }
+    const entries: ImportedPair[] = [];
+    const cols = header.map((h, c) => (c === labelCol || !h ? null : transposed ? m.matchFirst(h) : m.matchSecond(h)));
+    header.forEach((h, c) => c !== labelCol && h && !cols[c] && unmatched.add(h));
+    for (const row of body) {
+      const head = row[labelCol] ?? '';
+      if (!head.trim()) continue;
+      const rid = transposed ? m.matchSecond(head) : m.matchFirst(head);
+      if (!rid) {
+        unmatched.add(head);
+        continue;
+      }
+      row.forEach((cell, c) => {
+        const cid = cols[c];
+        if (!cid || !cell?.trim()) return;
+        const [a, b] = transposed ? [cid, rid] : [rid, cid];
+        entries.push({ pair: text(a, b), ...splitWordCell(cell) });
       });
     }
-    return { mode: 'matrix', entries };
+    return { mode: 'matrix', transposed, entries, unmatched: [...unmatched] };
   }
+
+  // ---- リスト形式 ----
+  const byReading = new Map<string, StickerId[]>();
+  if (reading) {
+    for (const a of STICKER_IDS)
+      for (const b of STICKER_IDS) {
+        const r = reading(text(a, b));
+        if (r) byReading.set(r, [a, b]);
+      }
+  }
+  const pairOf = (cell: string): [StickerId, StickerId] | null => {
+    const sp = m.splitPair(cell);
+    if (sp) return sp;
+    const r = byReading.get(clean(cell).replace(/\s+/g, ''));
+    return r ? [r[0], r[1]] : null;
+  };
+  const entries: ImportedPair[] = [];
   for (const row of table) {
-    const pair = clean(row[0] ?? '').replace(/[\s\-→>・/]/g, '');
+    const c0 = (row[0] ?? '').trim();
+    if (!c0) continue;
+    // 1 文字目 ｜ 2 文字目 ｜ 単語
+    const a1 = m.matchFirst(c0);
+    const b1 = row[1] ? m.matchSecond(row[1]) : null;
+    if (a1 && b1 && row[2]?.trim()) {
+      const w = splitWordCell(row[2]);
+      const memo = [w.memo, ...row.slice(3).filter(Boolean)].filter(Boolean).join(' / ');
+      entries.push({ pair: text(a1, b1), word: w.word, ...(memo ? { memo } : {}) });
+      continue;
+    }
     const word = (row[1] ?? '').trim();
-    if (!pair || !word) continue;
-    if (known.size && ![...known].some((k) => pair.startsWith(k))) continue;
-    entries.push({ pair, word, memo: row.slice(2).filter(Boolean).join(' / ') || undefined });
+    if (!word) continue;
+    const p = pairOf(c0);
+    if (!p) {
+      unmatched.add(c0);
+      continue;
+    }
+    const w = splitWordCell(word);
+    const memo = [w.memo, ...row.slice(2).filter(Boolean)].filter(Boolean).join(' / ');
+    entries.push({ pair: text(p[0], p[1]), word: w.word, ...(memo ? { memo } : {}) });
   }
-  return { mode: 'list', entries };
+  // 見出し行（「ペア」「単語」など）は一致しなくて当然なので数えない
+  const first = table.find((r) => r[0]?.trim())?.[0]?.trim();
+  if (first) unmatched.delete(first);
+  return { mode: 'list', entries, unmatched: [...unmatched] };
 }

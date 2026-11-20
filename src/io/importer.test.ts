@@ -44,10 +44,49 @@ describe('importer', () => {
     expect(m.splitPair('KAA')).toEqual(['U0', 'F3']);
   });
   it('reads letter pairs', () => {
-    const res = importPairTable(parseDelimited('ペア,単語\nあい,愛\nあう,会う'), ['あ', 'い', 'う']);
+    const kana = { ...cfg.corner, labels: labelsFromList('あいうえおかきくけこさしすせそたちつてとなにぬね'.split('')) };
+    const res = importPairTable('corner', kana, parseDelimited('ペア,単語\nあい,愛\nあう,会う\nかき,柿,秋の果物'));
     expect(res.entries).toEqual([
       { pair: 'あい', word: '愛' },
       { pair: 'あう', word: '会う' },
+      { pair: 'かき', word: '柿', memo: '秋の果物' },
+    ]);
+    expect(res.unmatched).toEqual([]);
+    // 1 文字目 | 2 文字目 | 単語
+    expect(importPairTable('corner', kana, parseDelimited('あ,い,愛')).entries).toEqual([{ pair: 'あい', word: '愛' }]);
+    // 表形式
+    const mx = importPairTable('corner', kana, parseDelimited(',あ,い,う,え\nあ,,愛,,\nか,蚊,,,\nき,,,,木の絵'));
+    expect(mx.mode).toBe('matrix');
+    expect(mx.entries).toEqual([
+      { pair: 'あい', word: '愛' },
+      { pair: 'かあ', word: '蚊' },
+      { pair: 'きえ', word: '木の絵' },
+    ]);
+  });
+  it('reads dual-label pair tables in either orientation, ignoring case', () => {
+    const labels = labelsFromList('K S T N H M Y R W G Z D B P KY SH CH NY HY MY RY GY J BY'.split(' '));
+    const labels2 = labelsFromList('A I U E O AA II UU EE OO YA YU YO AI AU EI OU UI IA IO UA UO OA OI'.split(' '));
+    const ec = { ...cfg.edge, labels, labels2, dual: true };
+    // 1 文字目は子音、2 文字目は母音。1 行目に 2 文字目
+    const normal = importPairTable('edge', ec, parseDelimited(',a,i,u,e\nk,蚊,木,区,毛\ns,差,詩,酢,背'));
+    expect(normal.transposed).toBe(false);
+    expect(normal.entries.slice(0, 2)).toEqual([
+      { pair: 'KA', word: '蚊' },
+      { pair: 'KI', word: '木' },
+    ]);
+    // 1 行目に 1 文字目（子音）
+    const tr = importPairTable('edge', ec, parseDelimited(',K,S,T,N\nA,蚊,差,田,菜\nI,木,詩,地,荷'));
+    expect(tr.transposed).toBe(true);
+    expect(tr.entries.slice(0, 2)).toEqual([
+      { pair: 'KA', word: '蚊' },
+      { pair: 'SA', word: '差' },
+    ]);
+    // かなの読みでも
+    const kr = importPairTable('edge', ec, parseDelimited('か,蚊\nし,詩'), (p) => romajiToKana(p));
+    // SI と SHI はどちらも「し」になるので、後から見つかった方が使われる
+    expect(kr.entries).toEqual([
+      { pair: 'KA', word: '蚊' },
+      { pair: 'SHI', word: '詩' },
     ]);
   });
   it('romaji to kana', () => {

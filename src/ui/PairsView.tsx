@@ -6,6 +6,7 @@ import { avgTime, formatSec } from '../data/srs';
 import { Modal, PieceTabs, StatusBadge, useCases, usePersisted, useTargets } from './shared';
 import { PairTable, TableLegend, TableOptions, timeTone, useTableOptions } from './PairTable';
 import { bufferOrder } from '../data/buffers';
+import { ImportPanel } from './ImportExport';
 
 /** そのパーツの文字の割り振りで現れるレターペアの一覧 */
 export function usePairList(pt: PieceType) {
@@ -34,6 +35,7 @@ export function PairsView() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [view, setView] = usePersisted<'list' | 'grid'>('pairs.view', 'list');
+  const [importing, setImporting] = useState(false);
   const opts = useTableOptions(false);
   const cfg = useStore((s) => s.pieces[pt]);
   const pairs = useStore((s) => s.pairs);
@@ -71,7 +73,15 @@ export function PairsView() {
         <div className="muted small">
           {PIECE_LABEL[pt]}の文字の割り振りで作られるペアです。同じ文字を使うパーツ同士ではイメージが共有されます。
         </div>
+        <button className="btn small" onClick={() => setImporting(true)}>
+          Excel・CSV から取り込む
+        </button>
       </div>
+      {importing && (
+        <Modal title="レターペアを取り込む" onClose={() => setImporting(false)} wide>
+          <ImportPanel pairsOnly piece={pt} bare />
+        </Modal>
+      )}
       <div className="toolbar">
         <div className="segmented">
           <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>
